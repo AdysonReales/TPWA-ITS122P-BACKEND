@@ -1,4 +1,7 @@
 const pool = require('../config/db');
+const { logAction } = require('../utils/logger');
+
+const VALID_STATUSES = ['planning', 'confirmed', 'ongoing', 'completed', 'cancelled'];
 
 // GET /api/trips
 // Customers see only their own trips. Staff/Admin see everyone's trips.
@@ -19,7 +22,7 @@ async function getTrips(req, res) {
   }
 }
 
-// GET /api/trips/:id
+// GET /api/trips/:id  (includes its destinations)
 async function getTripById(req, res) {
   try {
     const { id } = req.params;
@@ -36,7 +39,12 @@ async function getTripById(req, res) {
       return res.status(403).json({ message: 'You do not have access to this trip.' });
     }
 
-    return res.status(200).json({ trip });
+    const destinations = await pool.query(
+      'SELECT * FROM destinations WHERE trip_id = $1 ORDER BY order_sequence ASC',
+      [id]
+    );
+
+    return res.status(200).json({ trip: { ...trip, destinations: destinations.rows } });
   } catch (err) {
     console.error('Get trip by id error:', err);
     return res.status(500).json({ message: 'Server error.' });
@@ -47,22 +55,27 @@ async function getTripById(req, res) {
 async function createTrip(req, res) {
   try {
     const { id: userId } = req.user;
-    const { title, destination, start_date, end_date, budget, status } = req.body;
+    const { title, start_date, end_date, total_budget, status } = req.body;
 
-    if (!title || !destination || !start_date || !end_date) {
-      return res.status(400).json({
-        message: 'title, destination, start_date, and end_date are required.',
-      });
+    if (!title || !start_date || !end_date) {
+      return res.status(400).json({ message: 'title, start_date, and end_date are required.' });
+    }
+
+    if (status && !VALID_STATUSES.includes(status)) {
+      return res.status(400).json({ message: `status must be one of: ${VALID_STATUSES.join(', ')}` });
     }
 
     const result = await pool.query(
-      `INSERT INTO trips (user_id, title, destination, start_date, end_date, budget, status)
-       VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, 'planned'))
+      `INSERT INTO trips (user_id, title, start_date, end_date, total_budget, status)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6, 'planning'))
        RETURNING *`,
-      [userId, title, destination, start_date, end_date, budget || 0, status]
+      [userId, title, start_date, end_date, total_budget || 0, status]
     );
 
-    return res.status(201).json({ message: 'Trip created.', trip: result.rows[0] });
+    const trip = result.rows[0];
+    logAction({ userId, actionType: 'CREATE_TRIP', tableAffected: 'trips', recordId: trip.id, description: `Created trip "${title}"` });
+
+    return res.status(201).json({ message: 'Trip created.', trip });
   } catch (err) {
     console.error('Create trip error:', err);
     return res.status(500).json({ message: 'Server error.' });
@@ -74,7 +87,11 @@ async function updateTrip(req, res) {
   try {
     const { id } = req.params;
     const { id: userId, role } = req.user;
-    const { title, destination, start_date, end_date, budget, status } = req.body;
+    const { title, start_date, end_date, total_budget, status } = req.body;
+
+    if (status && !VALID_STATUSES.includes(status)) {
+      return res.status(400).json({ message: `status must be one of: ${VALID_STATUSES.join(', ')}` });
+    }
 
     const existing = await pool.query('SELECT * FROM trips WHERE id = $1', [id]);
     const trip = existing.rows[0];
@@ -91,15 +108,16 @@ async function updateTrip(req, res) {
     const result = await pool.query(
       `UPDATE trips
        SET title = COALESCE($1, title),
-           destination = COALESCE($2, destination),
-           start_date = COALESCE($3, start_date),
-           end_date = COALESCE($4, end_date),
-           budget = COALESCE($5, budget),
-           status = COALESCE($6, status)
-       WHERE id = $7
+           start_date = COALESCE($2, start_date),
+           end_date = COALESCE($3, end_date),
+           total_budget = COALESCE($4, total_budget),
+           status = COALESCE($5, status)
+       WHERE id = $6
        RETURNING *`,
-      [title, destination, start_date, end_date, budget, status, id]
+      [title, start_date, end_date, total_budget, status, id]
     );
+
+    logAction({ userId, actionType: 'UPDATE_TRIP', tableAffected: 'trips', recordId: id, description: `Updated trip #${id}` });
 
     return res.status(200).json({ message: 'Trip updated.', trip: result.rows[0] });
   } catch (err) {
@@ -121,12 +139,13 @@ async function deleteTrip(req, res) {
       return res.status(404).json({ message: 'Trip not found.' });
     }
 
-    // Customers can only delete their own trips; Staff/Admin can delete any trip.
     if (role === 'customer' && trip.user_id !== userId) {
       return res.status(403).json({ message: 'You do not have access to this trip.' });
     }
 
     await pool.query('DELETE FROM trips WHERE id = $1', [id]);
+    logAction({ userId, actionType: 'DELETE_TRIP', tableAffected: 'trips', recordId: id, description: `Deleted trip #${id}` });
+
     return res.status(200).json({ message: 'Trip deleted.' });
   } catch (err) {
     console.error('Delete trip error:', err);

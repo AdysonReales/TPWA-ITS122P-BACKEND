@@ -6,6 +6,13 @@ const cookieParser = require('cookie-parser');
 const authRoutes = require('./routes/auth.routes');
 const userRoutes = require('./routes/users.routes');
 const tripRoutes = require('./routes/trips.routes');
+const destinationRoutes = require('./routes/destinations.routes');
+const categoryRoutes = require('./routes/categories.routes');
+const vendorRoutes = require('./routes/vendors.routes');
+const activityRoutes = require('./routes/activities.routes');
+const bookingRoutes = require('./routes/bookings.routes');
+const notificationRoutes = require('./routes/notifications.routes');
+const logRoutes = require('./routes/logs.routes');
 
 const app = express();
 
@@ -33,6 +40,13 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/trips', tripRoutes);
+app.use('/api/destinations', destinationRoutes);
+app.use('/api/categories', categoryRoutes);
+app.use('/api/vendors', vendorRoutes);
+app.use('/api/activities', activityRoutes);
+app.use('/api/bookings', bookingRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/logs', logRoutes);
 
 // 404 handler
 app.use((req, res) => {

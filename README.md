@@ -52,11 +52,15 @@ Use the pooled ("Transaction" or "Session") connection string, not the direct on
 ## 🗄️ Database Setup (Supabase)
 
 1. Open your Supabase project > **SQL Editor** > New Query.
-2. Paste and run the contents of [`sql/schema.sql`](./sql/schema.sql). This creates:
-   - a `user_role` enum (`admin`, `staff`, `customer`)
-   - the `users` table (with hashed passwords)
-   - the `trips` table (sample CRUD resource)
+2. Paste and run the contents of [`sql/schema.sql`](./sql/schema.sql). This creates all 9 tables from the project ERD:
+   - `users` (roles: `admin`, `staff`, `customer`, `vendor`; supports activate/deactivate via `is_active`)
+   - `trips`, `destinations` (a trip's multi-stop itinerary)
+   - `vendor_profiles`, `categories`, `activities` (the bookable catalog)
+   - `bookings` (Pending → Confirmed/Cancelled/Completed approval workflow)
+   - `system_logs` (audit trail, written automatically by the API)
+   - `notifications` (in-app alerts for booking/trip updates)
    - a seed admin account: `admin@lakbye.com` / `Admin123!` — **change this password after your first login.**
+   - sample seed data (a customer, a vendor, a trip, a destination, categories, an activity, and a booking) so you have something to test against immediately.
 
 ---
 
@@ -96,10 +100,33 @@ Server runs at `http://localhost:5000` by default. Health check: `GET /api/healt
 | PUT    | `/api/users/:id`     | Admin only          | Update a user's name/role            |
 | DELETE | `/api/users/:id`     | Admin only          | Delete a user                        |
 | GET    | `/api/trips`         | Admin, Staff, Customer | List trips (customers see only their own) |
-| GET    | `/api/trips/:id`     | Admin, Staff, Customer | Get one trip (owner or staff/admin)  |
+| GET    | `/api/trips/:id`     | Admin, Staff, Customer | Get one trip, with its destinations  |
 | POST   | `/api/trips`         | Admin, Staff, Customer | Create a trip                        |
 | PUT    | `/api/trips/:id`     | Admin, Staff, Customer | Update a trip (owner or staff/admin) |
 | DELETE | `/api/trips/:id`     | Admin, Staff, Customer | Delete a trip (owner or staff/admin) |
+| GET    | `/api/destinations?trip_id=` | Admin, Staff, Customer | List a trip's destinations   |
+| POST   | `/api/destinations`  | Admin, Staff, Customer | Add a destination to a trip          |
+| PUT    | `/api/destinations/:id` | Admin, Staff, Customer | Update a destination              |
+| DELETE | `/api/destinations/:id` | Admin, Staff, Customer | Remove a destination              |
+| GET    | `/api/categories`    | Authenticated        | Browse the activity category catalog |
+| POST   | `/api/categories`    | Admin, Staff          | Add a category                       |
+| PUT    | `/api/categories/:id` | Admin, Staff         | Update a category                    |
+| DELETE | `/api/categories/:id` | Admin, Staff         | Delete a category                    |
+| GET    | `/api/vendors`       | Admin, Staff, Vendor  | List vendor profiles (vendor sees only their own) |
+| POST   | `/api/vendors`       | Admin, Staff, Vendor  | Create a vendor business profile     |
+| PUT    | `/api/vendors/:id`   | Admin, Staff, Vendor  | Update a vendor profile              |
+| DELETE | `/api/vendors/:id`   | Admin only            | Delete a vendor profile              |
+| GET    | `/api/activities`    | Authenticated         | Browse bookable activities (filter by `?destination_id=`, `?category_id=`, `?vendor_id=`) |
+| POST   | `/api/activities`    | Admin, Staff, Vendor  | Create an activity                   |
+| PUT    | `/api/activities/:id` | Admin, Staff, Vendor (own) | Update an activity              |
+| DELETE | `/api/activities/:id` | Admin, Staff, Vendor (own) | Delete an activity              |
+| GET    | `/api/bookings?status=` | Admin, Staff, Customer, Vendor | List relevant bookings (customer: own, vendor: theirs, staff/admin: all) |
+| POST   | `/api/bookings`      | Customer              | Submit a booking request (starts as `pending`) |
+| PUT    | `/api/bookings/:id`  | Admin, Staff          | Confirm, reject, or complete a booking |
+| GET    | `/api/notifications` | Authenticated         | Get the logged-in user's notifications |
+| PUT    | `/api/notifications/:id/read` | Authenticated | Mark one notification as read       |
+| PUT    | `/api/notifications/read-all` | Authenticated | Mark all notifications as read      |
+| GET    | `/api/logs?user_id=` | Admin only            | View the system audit trail          |
 
 ### Example: Register
 

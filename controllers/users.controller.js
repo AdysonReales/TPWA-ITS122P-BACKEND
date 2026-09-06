@@ -1,13 +1,13 @@
 const bcrypt = require('bcrypt');
 const pool = require('../config/db');
 
-const VALID_ROLES = ['admin', 'staff', 'customer'];
+const VALID_ROLES = ['admin', 'staff', 'customer', 'vendor'];
 
 // GET /api/users  (admin only)
 async function getAllUsers(req, res) {
   try {
     const result = await pool.query(
-      'SELECT id, full_name, email, role, created_at FROM users ORDER BY id ASC'
+      'SELECT id, full_name, email, role, is_active, created_at FROM users ORDER BY id ASC'
     );
     return res.status(200).json({ users: result.rows });
   } catch (err) {
@@ -21,7 +21,7 @@ async function getUserById(req, res) {
   try {
     const { id } = req.params;
     const result = await pool.query(
-      'SELECT id, full_name, email, role, created_at FROM users WHERE id = $1',
+      'SELECT id, full_name, email, role, is_active, created_at FROM users WHERE id = $1',
       [id]
     );
 
@@ -74,7 +74,7 @@ async function createUser(req, res) {
 async function updateUser(req, res) {
   try {
     const { id } = req.params;
-    const { full_name, role } = req.body;
+    const { full_name, role, is_active } = req.body;
 
     if (role && !VALID_ROLES.includes(role)) {
       return res.status(400).json({ message: `role must be one of: ${VALID_ROLES.join(', ')}` });
@@ -83,10 +83,11 @@ async function updateUser(req, res) {
     const result = await pool.query(
       `UPDATE users
        SET full_name = COALESCE($1, full_name),
-           role = COALESCE($2, role)
-       WHERE id = $3
-       RETURNING id, full_name, email, role, created_at`,
-      [full_name, role, id]
+           role = COALESCE($2, role),
+           is_active = COALESCE($3, is_active)
+       WHERE id = $4
+       RETURNING id, full_name, email, role, is_active, created_at`,
+      [full_name, role, is_active, id]
     );
 
     if (result.rows.length === 0) {
