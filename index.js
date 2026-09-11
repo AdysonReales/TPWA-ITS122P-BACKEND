@@ -1,4 +1,4 @@
-require('dotenv').config();
+﻿require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
@@ -13,6 +13,8 @@ const activityRoutes = require('./routes/activities.routes');
 const bookingRoutes = require('./routes/bookings.routes');
 const notificationRoutes = require('./routes/notifications.routes');
 const logRoutes = require('./routes/logs.routes');
+const expenseRoutes = require('./routes/expenses.routes');
+const { initExpensesTable } = require('./controllers/expenses.controller');
 
 const app = express();
 
@@ -40,6 +42,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/trips', tripRoutes);
+app.use('/api/trips/:tripId/budget', expenseRoutes);
 app.use('/api/destinations', destinationRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/vendors', vendorRoutes);
@@ -57,4 +60,5 @@ app.use((req, res) => {
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+  initExpensesTable();
 });

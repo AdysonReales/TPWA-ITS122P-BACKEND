@@ -217,3 +217,18 @@ INSERT INTO system_logs (user_id, action_type, table_affected, record_id, descri
 
 INSERT INTO notifications (user_id, title, message, type) VALUES
 (2, 'Booking Confirmed', 'Your booking for El Nido Island Hopping Tour A has been confirmed.', 'booking');
+
+-- ============================================================
+-- 10. EXPENSES (Trip line-item expenses for Budget tracking)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS expenses (
+    id             SERIAL PRIMARY KEY,
+    trip_id        INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    name           VARCHAR(150) NOT NULL,
+    items          INTEGER NOT NULL DEFAULT 1,
+    category       VARCHAR(50) NOT NULL,
+    cost           DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    date           DATE NOT NULL DEFAULT CURRENT_DATE,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_expenses_trip_id ON expenses(trip_id);
