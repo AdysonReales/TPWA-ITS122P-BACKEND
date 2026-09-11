@@ -50,7 +50,7 @@ async function register(req, res) {
     const result = await pool.query(
       `INSERT INTO users (full_name, email, password_hash, role)
        VALUES ($1, $2, $3, $4)
-       RETURNING id, full_name, email, role, created_at`,
+       RETURNING userid, full_name, email, role, created_at`,
       [full_name, email, password_hash, safeRole]
     );
 
