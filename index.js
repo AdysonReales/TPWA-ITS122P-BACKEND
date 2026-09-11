@@ -18,14 +18,47 @@ const { initExpensesTable } = require('./controllers/expenses.controller');
 
 const app = express();
 
-// Enable CORS so the Vercel frontend can call this backend.
-// credentials: true is required so the httpOnly auth cookie is sent/received.
-app.use(
-  cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-    credentials: true,
-  })
-);
+// Allowed origins for CORS (supports localhost, production Vercel, and Vercel preview deployments)
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:4173',
+  'https://lakbye.vercel.app',
+];
+
+if (process.env.FRONTEND_URL) {
+  process.env.FRONTEND_URL.split(',').forEach((url) => {
+    const trimmed = url.trim();
+    if (trimmed && !allowedOrigins.includes(trimmed)) {
+      allowedOrigins.push(trimmed);
+    }
+  });
+}
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow non-browser requests (curl, Postman, server-to-server)
+    if (!origin) return callback(null, true);
+
+    // Allow explicitly defined origins or any Vercel deployment (*.vercel.app)
+    const isAllowed =
+      allowedOrigins.includes(origin) ||
+      /^https:\/\/([a-zA-Z0-9-]+\.)*vercel\.app$/.test(origin);
+
+    if (isAllowed) {
+      return callback(null, true);
+    }
+
+    console.warn(`[CORS] Request origin blocked: ${origin}`);
+    return callback(new Error(`CORS policy blocked access from origin: ${origin}`), false);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'X-Requested-With', 'Accept'],
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(cookieParser());
 
