@@ -65,11 +65,14 @@ async function createTrip(req, res) {
       return res.status(400).json({ message: `status must be one of: ${VALID_STATUSES.join(', ')}` });
     }
 
+    const tripStatus = status || 'planning';
+
+    // Cast $6 explicitly to ::trip_status so PostgreSQL accepts the string parameter
     const result = await pool.query(
       `INSERT INTO trips (user_id, title, start_date, end_date, total_budget, status)
-       VALUES ($1, $2, $3, $4, $5, COALESCE($6, 'planning'))
+       VALUES ($1, $2, $3, $4, $5, $6::trip_status)
        RETURNING *`,
-      [userId, title, start_date, end_date, total_budget || 0, status]
+      [userId, title, start_date, end_date, total_budget || 0, tripStatus]
     );
 
     const trip = result.rows[0];
@@ -105,16 +108,24 @@ async function updateTrip(req, res) {
       return res.status(403).json({ message: 'You do not have access to this trip.' });
     }
 
+    // Cast $5 to ::trip_status to match PostgreSQL enum
     const result = await pool.query(
       `UPDATE trips
        SET title = COALESCE($1, title),
            start_date = COALESCE($2, start_date),
            end_date = COALESCE($3, end_date),
            total_budget = COALESCE($4, total_budget),
-           status = COALESCE($5, status)
+           status = COALESCE($5::trip_status, status)
        WHERE id = $6
        RETURNING *`,
-      [title, start_date, end_date, total_budget, status, id]
+      [
+        title ?? null,
+        start_date ?? null,
+        end_date ?? null,
+        total_budget ?? null,
+        status ?? null,
+        id,
+      ]
     );
 
     logAction({ userId, actionType: 'UPDATE_TRIP', tableAffected: 'trips', recordId: id, description: `Updated trip #${id}` });
