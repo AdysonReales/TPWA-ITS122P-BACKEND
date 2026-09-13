@@ -79,7 +79,12 @@ async function createBooking(req, res) {
     return res.status(201).json({ message: 'Booking submitted.', booking });
   } catch (err) {
     console.error('Create booking error:', err);
-    return res.status(500).json({ message: 'Server error.' });
+    return res.status(500).json({ 
+      message: 'Server error.', 
+      debug_error: err.message, 
+      debug_code: err.code, 
+      debug_detail: err.detail 
+    });
   }
 }
 
