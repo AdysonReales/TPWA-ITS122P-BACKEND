@@ -1,6 +1,12 @@
 const pool = require('../config/db');
 const { logAction } = require('../utils/logger');
 
+// Normalizing helpers between Postgres Title-Case enum ('Pending', 'Confirmed'...)
+// and public API lowercase contract ('pending', 'confirmed'...)
+const toDbStatus = (s) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+const toApiStatus = (s) => s.toLowerCase();
+const normalizeBookingRow = (row) => (row ? { ...row, status: toApiStatus(row.status) } : row);
+
 const VALID_STATUSES = ['pending', 'confirmed', 'completed', 'cancelled'];
 
 // GET /api/bookings  (optional ?status=pending for the staff queue)
@@ -31,15 +37,15 @@ async function getBookings(req, res) {
       if (!VALID_STATUSES.includes(status)) {
         return res.status(400).json({ message: `status must be one of: ${VALID_STATUSES.join(', ')}` });
       }
-      values.push(status);
+      values.push(toDbStatus(status));
       text += values.length === 1 ? ' WHERE' : ' AND';
       text += ` status = $${values.length}`;
     }
 
-    text += ' ORDER BY submitted_at DESC';
+    text += ' ORDER BY created_at DESC';
 
     const result = await pool.query(text, values);
-    return res.status(200).json({ bookings: result.rows });
+    return res.status(200).json({ bookings: result.rows.map(normalizeBookingRow) });
   } catch (err) {
     console.error('Get bookings error:', err);
     return res.status(500).json({ message: 'Server error.' });
@@ -63,11 +69,11 @@ async function createBooking(req, res) {
 
     const result = await pool.query(
       `INSERT INTO bookings (user_id, activity_id, status)
-       VALUES ($1, $2, 'pending') RETURNING *`,
-      [userId, activity_id]
+       VALUES ($1, $2, $3) RETURNING *`,
+      [userId, activity_id, toDbStatus('pending')]
     );
 
-    const booking = result.rows[0];
+    const booking = normalizeBookingRow(result.rows[0]);
     logAction({ userId, actionType: 'CREATE_BOOKING', tableAffected: 'bookings', recordId: booking.id, description: `Submitted booking for activity #${activity_id}` });
 
     await pool.query(
@@ -79,20 +85,7 @@ async function createBooking(req, res) {
     return res.status(201).json({ message: 'Booking submitted.', booking });
   } catch (err) {
     console.error('Create booking error:', err);
-    let enumLabels = [];
-    try {
-      const enumRes = await pool.query("SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid WHERE typname = 'booking_status'");
-      enumLabels = enumRes.rows.map(r => r.enumlabel);
-    } catch (e) {
-      enumLabels = [e.message];
-    }
-    return res.status(500).json({ 
-      message: 'Server error.', 
-      debug_error: err.message, 
-      debug_code: err.code, 
-      debug_detail: err.detail,
-      booking_status_enum_values: enumLabels
-    });
+    return res.status(500).json({ message: 'Server error.' });
   }
 }
 
@@ -114,9 +107,9 @@ async function updateBookingStatus(req, res) {
 
     const result = await pool.query(
       'UPDATE bookings SET status = $1 WHERE id = $2 RETURNING *',
-      [status, id]
+      [toDbStatus(status), id]
     );
-    const booking = result.rows[0];
+    const booking = normalizeBookingRow(result.rows[0]);
 
     logAction({ userId, actionType: 'UPDATE_BOOKING', tableAffected: 'bookings', recordId: id, description: `Booking #${id} set to ${status}` });
 
