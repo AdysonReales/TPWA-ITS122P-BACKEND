@@ -79,11 +79,19 @@ async function createBooking(req, res) {
     return res.status(201).json({ message: 'Booking submitted.', booking });
   } catch (err) {
     console.error('Create booking error:', err);
+    let enumLabels = [];
+    try {
+      const enumRes = await pool.query("SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid WHERE typname = 'booking_status'");
+      enumLabels = enumRes.rows.map(r => r.enumlabel);
+    } catch (e) {
+      enumLabels = [e.message];
+    }
     return res.status(500).json({ 
       message: 'Server error.', 
       debug_error: err.message, 
       debug_code: err.code, 
-      debug_detail: err.detail 
+      debug_detail: err.detail,
+      booking_status_enum_values: enumLabels
     });
   }
 }
