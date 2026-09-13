@@ -78,7 +78,7 @@ async function createBooking(req, res) {
 
     await pool.query(
       `INSERT INTO notifications (user_id, title, message, type)
-       VALUES ($1, 'Booking Submitted', 'Your booking request has been submitted and is pending approval.', 'booking')`,
+       VALUES ($1, 'Booking Submitted', 'Your booking request has been submitted and is pending approval.', 'Booking')`,
       [userId]
     );
 
@@ -122,7 +122,7 @@ async function updateBookingStatus(req, res) {
 
     await pool.query(
       `INSERT INTO notifications (user_id, title, message, type)
-       VALUES ($1, 'Booking Update', $2, 'booking')`,
+       VALUES ($1, 'Booking Update', $2, 'Booking')`,
       [booking.user_id, notifMessage]
     );
 
