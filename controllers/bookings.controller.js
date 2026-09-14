@@ -22,15 +22,24 @@ async function getBookings(req, res) {
 
     if (role === 'customer') {
       values.push(userId);
-      text = 'SELECT * FROM bookings WHERE user_id = $1';
+      text = `SELECT b.*, u.full_name AS customer_name, a.title AS activity_title 
+              FROM bookings b 
+              LEFT JOIN users u ON u.id = b.user_id 
+              LEFT JOIN activities a ON a.id = b.activity_id 
+              WHERE b.user_id = $1`;
     } else if (role === 'vendor') {
       values.push(userId);
-      text = `SELECT b.* FROM bookings b
+      text = `SELECT b.*, u.full_name AS customer_name, a.title AS activity_title 
+              FROM bookings b
+              LEFT JOIN users u ON u.id = b.user_id
               JOIN activities a ON a.id = b.activity_id
               JOIN vendor_profiles v ON v.id = a.vendor_id
               WHERE v.user_id = $1`;
     } else {
-      text = 'SELECT * FROM bookings';
+      text = `SELECT b.*, u.full_name AS customer_name, a.title AS activity_title 
+              FROM bookings b 
+              LEFT JOIN users u ON u.id = b.user_id 
+              LEFT JOIN activities a ON a.id = b.activity_id`;
     }
 
     if (status) {
@@ -39,10 +48,10 @@ async function getBookings(req, res) {
       }
       values.push(toDbStatus(status));
       text += values.length === 1 ? ' WHERE' : ' AND';
-      text += ` status = $${values.length}`;
+      text += ` b.status = ${values.length}`;
     }
 
-    text += ' ORDER BY created_at DESC';
+    text += ' ORDER BY b.created_at DESC';
 
     const result = await pool.query(text, values);
     return res.status(200).json({ bookings: result.rows.map(normalizeBookingRow) });
