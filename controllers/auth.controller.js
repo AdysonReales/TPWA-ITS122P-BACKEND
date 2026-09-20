@@ -7,7 +7,7 @@ const TOKEN_EXPIRY = '1d';
 
 function signToken(user) {
   return jwt.sign(
-    { id: user.id, email: user.email, role: user.role },
+    { id: user.id, email: user.email, role: user.role, username: user.username },
     process.env.JWT_SECRET,
     { expiresIn: TOKEN_EXPIRY }
   );
@@ -48,10 +48,10 @@ async function register(req, res) {
     const password_hash = await bcrypt.hash(password, SALT_ROUNDS);
 
     const result = await pool.query(
-      `INSERT INTO users (full_name, email, password_hash, role)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, full_name, email, role, created_at`,
-      [full_name, email, password_hash, safeRole]
+      `INSERT INTO users (full_name, email, password_hash, role, username, avatar_url, bio)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, full_name, email, role, username, avatar_url, bio, created_at`,
+      [full_name, email, password_hash, safeRole, null, null, null]
     );
 
     const user = result.rows[0];
@@ -127,7 +127,7 @@ function logout(req, res) {
 async function getCurrentUser(req, res) {
   try {
     const result = await pool.query(
-      'SELECT id, full_name, email, role, created_at FROM users WHERE id = $1',
+      'SELECT id, full_name, email, role, username, avatar_url, bio, created_at FROM users WHERE id = $1',
       [req.user.id]
     );
 

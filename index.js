@@ -84,6 +84,11 @@ app.use('/api/bookings', bookingRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/logs', logRoutes);
 
+
+// Increase payload size limit for JSON and URL-encoded data to handle larger requests (e.g., images, large JSON objects)
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({ message: 'Route not found.' });
