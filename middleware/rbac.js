@@ -7,11 +7,17 @@
  */
 function authorizeRoles(...allowedRoles) {
   return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({ message: 'Access denied. No authenticated user.' });
+    // 1. Check if user and role exist in the token payload
+    if (!req.user || !req.user.role) {
+      return res.status(403).json({ message: 'Access denied. Role missing from token.' });
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
+    // 2. Normalize roles to lowercase to prevent 'ADMIN' vs 'admin' 403 errors
+    const userRole = String(req.user.role).trim().toLowerCase();
+    const normalizedAllowedRoles = allowedRoles.map(r => String(r).trim().toLowerCase());
+
+    // 3. Check if the user's role is in the allowed list
+    if (!normalizedAllowedRoles.includes(userRole)) {
       return res.status(403).json({
         message: `Access denied. Requires one of these roles: ${allowedRoles.join(', ')}`,
       });

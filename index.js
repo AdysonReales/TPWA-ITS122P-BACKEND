@@ -15,6 +15,7 @@ const notificationRoutes = require('./routes/notifications.routes');
 const logRoutes = require('./routes/logs.routes');
 const expenseRoutes = require('./routes/expenses.routes');
 const { initExpensesTable } = require('./controllers/expenses.controller');
+const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
 
@@ -83,7 +84,7 @@ app.use('/api/activities', activityRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/logs', logRoutes);
-
+app.use('/api/admin', adminRoutes);
 
 // Increase payload size limit for JSON and URL-encoded data to handle larger requests (e.g., images, large JSON objects)
 app.use(express.json({ limit: '10mb' }));

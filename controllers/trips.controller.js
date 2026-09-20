@@ -2,6 +2,7 @@ const pool = require('../config/db');
 const { logAction } = require('../utils/logger');
 
 const VALID_STATUSES = ['planning', 'confirmed', 'ongoing', 'completed', 'cancelled'];
+const VALID_VISIBILITIES = ['private', 'friends', 'public'];
 
 // GET /api/trips
 // Customers see only their own trips. Staff/Admin see everyone's trips.
@@ -35,7 +36,8 @@ async function getTripById(req, res) {
       return res.status(404).json({ message: 'Trip not found.' });
     }
 
-    if (role === 'customer' && trip.user_id !== userId) {
+    // Allow viewing if public or if owner/admin
+    if (role === 'customer' && trip.user_id !== userId && trip.visibility !== 'public') {
       return res.status(403).json({ message: 'You do not have access to this trip.' });
     }
 
@@ -55,7 +57,7 @@ async function getTripById(req, res) {
 async function createTrip(req, res) {
   try {
     const { id: userId } = req.user;
-    const { title, start_date, end_date, total_budget, status } = req.body;
+    const { title, start_date, end_date, total_budget, status, cover_photo, visibility } = req.body;
 
     if (!title || !start_date || !end_date) {
       return res.status(400).json({ message: 'title, start_date, and end_date are required.' });
@@ -66,13 +68,13 @@ async function createTrip(req, res) {
     }
 
     const tripStatus = status || 'planning';
+    const tripVisibility = (visibility && VALID_VISIBILITIES.includes(visibility)) ? visibility : 'private';
 
-    // Cast $6 explicitly to ::trip_status so PostgreSQL accepts the string parameter
     const result = await pool.query(
-      `INSERT INTO trips (user_id, title, start_date, end_date, total_budget, status)
-       VALUES ($1, $2, $3, $4, $5, $6::trip_status)
+      `INSERT INTO trips (user_id, title, start_date, end_date, total_budget, status, cover_photo, visibility)
+       VALUES ($1, $2, $3, $4, $5, $6::trip_status, $7, $8)
        RETURNING *`,
-      [userId, title, start_date, end_date, total_budget || 0, tripStatus]
+      [userId, title, start_date, end_date, total_budget || 0, tripStatus, cover_photo || null, tripVisibility]
     );
 
     const trip = result.rows[0];
@@ -90,10 +92,14 @@ async function updateTrip(req, res) {
   try {
     const { id } = req.params;
     const { id: userId, role } = req.user;
-    const { title, start_date, end_date, total_budget, status } = req.body;
+    const { title, start_date, end_date, total_budget, status, cover_photo, visibility } = req.body;
 
     if (status && !VALID_STATUSES.includes(status)) {
       return res.status(400).json({ message: `status must be one of: ${VALID_STATUSES.join(', ')}` });
+    }
+    
+    if (visibility && !VALID_VISIBILITIES.includes(visibility)) {
+      return res.status(400).json({ message: `visibility must be one of: ${VALID_VISIBILITIES.join(', ')}` });
     }
 
     const existing = await pool.query('SELECT * FROM trips WHERE id = $1', [id]);
@@ -103,20 +109,20 @@ async function updateTrip(req, res) {
       return res.status(404).json({ message: 'Trip not found.' });
     }
 
-    // Customers can only edit their own trips; Staff/Admin can edit any trip.
     if (role === 'customer' && trip.user_id !== userId) {
       return res.status(403).json({ message: 'You do not have access to this trip.' });
     }
 
-    // Cast $5 to ::trip_status to match PostgreSQL enum
     const result = await pool.query(
       `UPDATE trips
        SET title = COALESCE($1, title),
            start_date = COALESCE($2, start_date),
            end_date = COALESCE($3, end_date),
            total_budget = COALESCE($4, total_budget),
-           status = COALESCE($5::trip_status, status)
-       WHERE id = $6
+           status = COALESCE($5::trip_status, status),
+           cover_photo = COALESCE($6, cover_photo),
+           visibility = COALESCE($7, visibility)
+       WHERE id = $8
        RETURNING *`,
       [
         title ?? null,
@@ -124,6 +130,8 @@ async function updateTrip(req, res) {
         end_date ?? null,
         total_budget ?? null,
         status ?? null,
+        cover_photo ?? null,
+        visibility ?? null,
         id,
       ]
     );

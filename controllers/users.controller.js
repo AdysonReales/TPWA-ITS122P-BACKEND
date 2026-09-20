@@ -75,41 +75,36 @@ async function createUser(req, res) {
 async function updateUser(req, res) {
   try {
     const { id } = req.params;
+    const { name, full_name, username, bio, avatar_url, password, role, is_active } = req.body;
 
-    // Allow user to edit their own account, or allow admin to edit any account
-    if (req.user.role !== 'admin' && Number(req.user.id) !== Number(id)) {
-      return res.status(403).json({ message: 'Forbidden: You can only update your own profile.' });
-    }
-
-    const { full_name, name, role, is_active, username, bio, avatar_url } = req.body;
-    const displayName = full_name || name;
-
-    // Regular users cannot elevate their role or change active status
-    const safeRole = req.user.role === 'admin' ? role : undefined;
-    const safeIsActive = req.user.role === 'admin' ? is_active : undefined;
-
-    if (safeRole && !VALID_ROLES.includes(safeRole)) {
-      return res.status(400).json({ message: `role must be one of: ${VALID_ROLES.join(', ')}` });
-    }
-
+    // Update user in PostgreSQL database including username, bio, and avatar_url
     const result = await pool.query(
       `UPDATE users
        SET full_name = COALESCE($1, full_name),
-           role = COALESCE($2, role),
-           is_active = COALESCE($3, is_active),
-           username = COALESCE($4, username),
-           bio = COALESCE($5, bio),
-           avatar_url = COALESCE($6, avatar_url)
+           username = COALESCE($2, username),
+           bio = COALESCE($3, bio),
+           avatar_url = COALESCE($4, avatar_url),
+           role = COALESCE($5, role),
+           is_active = COALESCE($6, is_active)
        WHERE id = $7
-       RETURNING id, full_name, email, role, is_active, username, bio, avatar_url, created_at`,
-      [displayName, safeRole, safeIsActive, username, bio, avatar_url, id]
+       RETURNING id, full_name, username, email, role, bio, avatar_url, is_active`,
+      [
+        full_name || name,
+        username,
+        bio,
+        avatar_url,
+        role,
+        is_active,
+        id,
+      ]
     );
 
-    if (result.rows.length === 0) {
+    const updatedUser = result.rows[0];
+    if (!updatedUser) {
       return res.status(404).json({ message: 'User not found.' });
     }
 
-    return res.status(200).json({ message: 'User updated.', user: result.rows[0] });
+    return res.status(200).json({ message: 'User updated successfully.', user: updatedUser });
   } catch (err) {
     console.error('Update user error:', err);
     return res.status(500).json({ message: 'Server error.' });
@@ -160,33 +155,44 @@ async function searchUsers(req, res) {
 async function getUserByUsername(req, res) {
   try {
     const { username } = req.params;
-    const cleanUsername = username.replace(/^@/, '');
+    const cleanUsername = username.replace(/^@+/, '');
 
+    // 1. Fetch user by username
     const userResult = await pool.query(
-      `SELECT id, full_name, username, bio, avatar_url, created_at 
-       FROM users 
-       WHERE LOWER(username) = LOWER($1)`,
+      'SELECT id, full_name, username, bio, avatar_url FROM users WHERE username = $1',
       [cleanUsername]
     );
+    const user = userResult.rows[0];
 
-    if (userResult.rows.length === 0) {
+    if (!user) {
       return res.status(404).json({ message: 'User not found.' });
     }
 
-    const user = userResult.rows[0];
-
-    // Fetch public trips associated with this user
+    // 2. Fetch public trips belonging to this user
     const tripsResult = await pool.query(
-      `SELECT id, title, start_date, end_date, total_budget, status, created_at 
-       FROM trips 
-       WHERE user_id = $1 
-       ORDER BY start_date DESC`,
+      "SELECT * FROM trips WHERE user_id = $1 AND visibility = 'public' ORDER BY start_date ASC",
       [user.id]
     );
 
+    // Map trips to match frontend camelCase expectations if needed
+    const trips = tripsResult.rows.map(t => ({
+      id: t.id,
+      name: t.title,
+      startDate: t.start_date,
+      endDate: t.end_date,
+      totalBudget: t.total_budget,
+      status: t.status,
+      cover_photo: t.cover_photo,
+      visibility: t.visibility,
+    }));
+
     return res.status(200).json({
-      ...user,
-      trips: tripsResult.rows,
+      id: user.id,
+      full_name: user.full_name,
+      username: user.username,
+      bio: user.bio,
+      avatar_url: user.avatar_url,
+      trips,
     });
   } catch (err) {
     console.error('Get user by username error:', err);
