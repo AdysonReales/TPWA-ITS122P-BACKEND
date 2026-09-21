@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const SALT_ROUNDS = 10;
 const TOKEN_EXPIRY = '1d';
 
-let resend = null;
+const resend = new Resend(process.env.RESEND_API_KEY);
 try {
   const { Resend } = require('resend');
   if (process.env.RESEND_API_KEY) {
@@ -167,59 +167,78 @@ async function forgotPassword(req, res) {
     );
     const user = userRes.rows[0];
 
-    // Return generic message even if email isn't found for security
+    // Return a generic message even if email is not found to prevent user enumeration
     if (!user) {
-      return res.status(200).json({ 
-        message: 'If an account exists, a reset link has been dispatched.' 
+      return res.status(200).json({
+        message: 'If an account exists, a reset link has been dispatched.',
       });
     }
 
-    // 1. Generate secure random token
+    // 1. Generate secure random token and expiration window
     const token = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 1000 * 60 * 30); // 30 minutes
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 30); // 30 minutes expiry
 
-    // 2. Persist token to database
+    // 2. Persist token and expiration to the database
     await pool.query(
       'UPDATE users SET reset_password_token = $1, reset_password_expires = $2 WHERE id = $3',
       [token, expiresAt, user.id]
     );
 
-    // 3. Construct reset link
-    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    const resetUrl = `${baseUrl}/reset-password?token=${token}`;
+    // 3. Construct the reset link (Prioritizing Vercel production or custom CLIENT/FRONTEND_URL)
+    const clientBaseUrl =
+      process.env.FRONTEND_URL ||
+      process.env.CLIENT_URL ||
+      req.get('origin') ||
+      'https://tpwa-its122p-frontend.vercel.app';
+
+    const cleanBaseUrl = clientBaseUrl.replace(/\/$/, '');
+    const resetUrl = `${cleanBaseUrl}/reset-password?token=${token}`;
+
+    console.log(`\n🔑 [PASSWORD RESET LINK]: ${resetUrl}\n`);
 
     // 4. Send via Resend
-    // Note: With Resend's free testing tier, emails send from 'onboarding@resend.dev' 
-    // to the email you used to register on Resend.
-    await resend.emails.send({
-      from: 'LakBye <onboarding@resend.dev>',
-      to: user.email,
-      subject: 'Reset your LakBye password',
-      html: `
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; border: 1px solid #eaeaea; border-radius: 12px;">
-          <h2 style="color: #111; margin-bottom: 12px;">Reset Your Password</h2>
-          <p style="color: #555; font-size: 15px; line-height: 1.5;">
-            Hi ${user.full_name || 'Traveler'},
-          </p>
-          <p style="color: #555; font-size: 15px; line-height: 1.5;">
-            We received a request to reset your password for your LakBye account. Click the button below to choose a new password:
-          </p>
-          <div style="margin: 28px 0;">
-            <a href="${resetUrl}" style="background-color: #f05a28; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">
-              Reset Password
-            </a>
+    try {
+      await resend.emails.send({
+        from: 'LakBye <onboarding@resend.dev>',
+        to: user.email,
+        subject: 'Reset your LakBye password',
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; border: 1px solid #eaeaea; border-radius: 12px; background-color: #ffffff;">
+            <div style="margin-bottom: 20px;">
+              <h1 style="color: #f05a28; font-size: 24px; font-weight: 800; margin: 0;">LakBye</h1>
+            </div>
+            <h2 style="color: #111; margin-bottom: 12px; font-size: 18px;">Reset Your Password</h2>
+            <p style="color: #555; font-size: 15px; line-height: 1.5;">
+              Hi ${user.full_name || 'Traveler'},
+            </p>
+            <p style="color: #555; font-size: 15px; line-height: 1.5;">
+              We received a request to reset your password for your LakBye account. Click the button below to choose a new password:
+            </p>
+            <div style="margin: 28px 0;">
+              <a href="${resetUrl}" style="background-color: #f05a28; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">
+                Reset Password
+              </a>
+            </div>
+            <p style="color: #888; font-size: 13px; line-height: 1.5;">
+              This link is valid for 30 minutes. If you did not request this change, you can safely ignore this email.
+            </p>
+            <hr style="border: none; border-top: 1px solid #eaeaea; margin: 24px 0;" />
+            <p style="color: #aaa; font-size: 12px; line-height: 1.4;">
+              If you are having trouble clicking the button, copy and paste this URL into your browser:<br/>
+              <a href="${resetUrl}" style="color: #f05a28; word-break: break-all;">${resetUrl}</a>
+            </p>
           </div>
-          <p style="color: #888; font-size: 13px; line-height: 1.5;">
-            This link is valid for 30 minutes. If you did not request this, you can safely ignore this email.
-          </p>
-        </div>
-      `,
-    });
+        `,
+      });
 
-    console.log(`✉️ Password reset email successfully dispatched to: ${user.email}`);
+      console.log(`✉️ Password reset email successfully dispatched to: ${user.email}`);
+    } catch (emailErr) {
+      console.error('Resend delivery error:', emailErr);
+      // Even if Resend free tier has domain restrictions, keep going so local/dev testing does not crash
+    }
 
     return res.status(200).json({
-      message: 'Reset instructions have been sent.',
+      message: 'If an account exists, a reset link has been dispatched.',
       devResetUrl: process.env.NODE_ENV !== 'production' ? resetUrl : undefined,
     });
   } catch (err) {
@@ -232,6 +251,7 @@ async function forgotPassword(req, res) {
 async function resetPassword(req, res) {
   try {
     const { token, password } = req.body;
+
     if (!token || !password) {
       return res.status(400).json({ message: 'Token and new password are required.' });
     }
@@ -240,9 +260,10 @@ async function resetPassword(req, res) {
       return res.status(400).json({ message: 'Password must be at least 8 characters long.' });
     }
 
-    // Look up token in database and check if still valid
+    // 1. Locate user by matching token and verifying timestamptz expiry against NOW()
     const userRes = await pool.query(
-      `SELECT id FROM users 
+      `SELECT id, email 
+       FROM users 
        WHERE reset_password_token = $1 
          AND reset_password_expires > NOW()`,
       [token]
@@ -250,11 +271,16 @@ async function resetPassword(req, res) {
 
     const user = userRes.rows[0];
     if (!user) {
-      return res.status(400).json({ message: 'Invalid or expired password reset link.' });
+      return res.status(400).json({
+        message: 'Invalid or expired password reset link. Please request a new one.',
+      });
     }
 
-    // Hash new password and clear the reset token
-    const passwordHash = await bcrypt.hash(password, 10);
+    // 2. Hash new password
+    const saltRounds = 10;
+    const passwordHash = await bcrypt.hash(password, saltRounds);
+
+    // 3. Update password and clear token columns in the database
     await pool.query(
       `UPDATE users 
        SET password_hash = $1, 
@@ -264,12 +290,14 @@ async function resetPassword(req, res) {
       [passwordHash, user.id]
     );
 
-    return res.status(200).json({ 
-      message: 'Password updated successfully. You can now log in.' 
+    console.log(`🔐 Password successfully updated for user ID: ${user.id} (${user.email})`);
+
+    return res.status(200).json({
+      message: 'Password updated successfully! You can now log in with your new password.',
     });
   } catch (err) {
     console.error('Reset password error:', err);
-    return res.status(500).json({ message: 'Failed to reset password.' });
+    return res.status(500).json({ message: 'Failed to reset password. Please try again.' });
   }
 }
 
