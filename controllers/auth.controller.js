@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const SALT_ROUNDS = 10;
 const TOKEN_EXPIRY = '1d';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+let resend = null;
 try {
   const { Resend } = require('resend');
   if (process.env.RESEND_API_KEY) {
@@ -197,7 +197,8 @@ async function forgotPassword(req, res) {
     console.log(`\n🔑 [PASSWORD RESET LINK]: ${resetUrl}\n`);
 
     // 4. Send via Resend
-    try {
+    if (resend) {
+      try {
       await resend.emails.send({
         from: 'LakBye <onboarding@resend.dev>',
         to: user.email,
@@ -235,6 +236,9 @@ async function forgotPassword(req, res) {
     } catch (emailErr) {
       console.error('Resend delivery error:', emailErr);
       // Even if Resend free tier has domain restrictions, keep going so local/dev testing does not crash
+    }
+    } else {
+      console.log(`\n✉️ [RESEND_API_KEY NOT CONFIGURED] Reset link for ${user.email}: ${resetUrl}\n`);
     }
 
     return res.status(200).json({
@@ -301,4 +305,22 @@ async function resetPassword(req, res) {
   }
 }
 
-module.exports = { register, login, logout, getCurrentUser, forgotPassword, resetPassword};
+
+/**
+ * Automatically ensures password recovery columns exist in PostgreSQL on startup.
+ */
+async function initAuthColumns() {
+  try {
+    await pool.query(`
+      ALTER TABLE users 
+      ADD COLUMN IF NOT EXISTS reset_password_token VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS reset_password_expires TIMESTAMPTZ;
+    `);
+    console.log('User auth password recovery columns verified.');
+  } catch (err) {
+    console.error('Failed to verify user auth password recovery columns:', err);
+  }
+}
+
+module.exports = { register, login, logout, getCurrentUser, forgotPassword, resetPassword, initAuthColumns };
+
