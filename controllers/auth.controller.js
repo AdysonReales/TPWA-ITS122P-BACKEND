@@ -2,18 +2,65 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
 const crypto = require('crypto');
+const SibApiV3Sdk = require('@getbrevo/brevo');
+
 const SALT_ROUNDS = 10;
 const TOKEN_EXPIRY = '1d';
 
-let resend = null;
-try {
-  const { Resend } = require('resend');
-  if (process.env.RESEND_API_KEY) {
-    resend = new Resend(process.env.RESEND_API_KEY);
-  }
-} catch {
-  // resend package not yet installed or configured
+let apiInstance = null;
+if (process.env.BREVO_API_KEY) {
+  apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
+  apiInstance.setApiKey(SibApiV3Sdk.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY);
 }
+
+const sendOtpEmail = async (toEmail, otp, resetUrl) => {
+  if (!apiInstance && process.env.BREVO_API_KEY) {
+    apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
+    apiInstance.setApiKey(SibApiV3Sdk.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY);
+  }
+
+  if (!apiInstance) {
+    throw new Error('BREVO_API_KEY is not configured');
+  }
+
+  const senderEmail = process.env.EMAIL_FROM || 'no-reply@lakbye.com';
+  const email = new SibApiV3Sdk.SendSmtpEmail();
+  email.sender = { email: senderEmail, name: 'LakBye' };
+  email.to = [{ email: toEmail }];
+  email.subject = 'Your LakBye password reset code';
+  email.htmlContent = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; border: 1px solid #eaeaea; border-radius: 12px; background-color: #ffffff;">
+      <div style="margin-bottom: 20px;">
+        <h1 style="color: #f05a28; font-size: 24px; font-weight: 800; margin: 0;">LakBye</h1>
+      </div>
+      <h2 style="color: #111; margin-bottom: 12px; font-size: 18px;">Reset Your Password</h2>
+      <p style="color: #555; font-size: 15px; line-height: 1.5;">
+        Your reset code is: <strong style="font-size: 18px; color: #f05a28; letter-spacing: 1px;">${otp}</strong>.
+      </p>
+      <p style="color: #555; font-size: 14px; line-height: 1.5;">
+        This code expires in 30 minutes.
+      </p>
+      ${
+        resetUrl
+          ? `<div style="margin: 28px 0;">
+              <a href="${resetUrl}" style="background-color: #f05a28; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">
+                Reset Password Link
+              </a>
+            </div>
+            <p style="color: #888; font-size: 13px; line-height: 1.5;">
+              If you are having trouble clicking the button, copy and paste this URL into your browser:<br/>
+              <a href="${resetUrl}" style="color: #f05a28; word-break: break-all;">${resetUrl}</a>
+            </p>`
+          : ''
+      }
+      <hr style="border: none; border-top: 1px solid #eaeaea; margin: 24px 0;" />
+      <p style="color: #aaa; font-size: 12px; line-height: 1.4;">
+        If you did not request this password reset, you can safely ignore this email.
+      </p>
+    </div>
+  `;
+  return apiInstance.sendTransacEmail(email);
+};
 
 function signToken(user) {
   return jwt.sign(
@@ -169,7 +216,7 @@ async function forgotPassword(req, res) {
 
     // Return generic message if email is not found to prevent user enumeration
     if (!user) {
-      console.log(`⚠️ [PASSWORD RESET] No user found for: ${cleanEmail}`);
+      console.log(`[PASSWORD RESET] No user found for: ${cleanEmail}`);
       return res.status(200).json({
         message: 'If an account exists, a reset link has been dispatched.',
         accountFound: false,
@@ -196,54 +243,23 @@ async function forgotPassword(req, res) {
     const cleanBaseUrl = clientBaseUrl.replace(/\/$/, '');
     const resetUrl = `${cleanBaseUrl}/reset-password?token=${token}`;
 
-    console.log(`\n🔑 [PASSWORD RESET LINK]: ${resetUrl}\n`);
+    console.log(`\n[PASSWORD RESET LINK]: ${resetUrl}\n`);
 
-    // 4. Send via Resend if available
+    // 4. Send via Brevo if configured
     let emailSent = false;
     let emailError = null;
 
-    if (resend) {
+    if (process.env.BREVO_API_KEY) {
       try {
-        await resend.emails.send({
-          from: 'LakBye <onboarding@resend.dev>',
-          to: user.email,
-          subject: 'Reset your LakBye password',
-          html: `
-            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; border: 1px solid #eaeaea; border-radius: 12px; background-color: #ffffff;">
-              <div style="margin-bottom: 20px;">
-                <h1 style="color: #f05a28; font-size: 24px; font-weight: 800; margin: 0;">LakBye</h1>
-              </div>
-              <h2 style="color: #111; margin-bottom: 12px; font-size: 18px;">Reset Your Password</h2>
-              <p style="color: #555; font-size: 15px; line-height: 1.5;">
-                Hi ${user.full_name || 'Traveler'},
-              </p>
-              <p style="color: #555; font-size: 15px; line-height: 1.5;">
-                We received a request to reset your password for your LakBye account. Click the button below to choose a new password:
-              </p>
-              <div style="margin: 28px 0;">
-                <a href="${resetUrl}" style="background-color: #f05a28; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">
-                  Reset Password
-                </a>
-              </div>
-              <p style="color: #888; font-size: 13px; line-height: 1.5;">
-                This link is valid for 30 minutes. If you did not request this change, you can safely ignore this email.
-              </p>
-              <hr style="border: none; border-top: 1px solid #eaeaea; margin: 24px 0;" />
-              <p style="color: #aaa; font-size: 12px; line-height: 1.4;">
-                If you are having trouble clicking the button, copy and paste this URL into your browser:<br/>
-                <a href="${resetUrl}" style="color: #f05a28; word-break: break-all;">${resetUrl}</a>
-              </p>
-            </div>
-          `,
-        });
+        await sendOtpEmail(user.email, token, resetUrl);
         emailSent = true;
-        console.log(`✉️ Password reset email successfully dispatched to: ${user.email}`);
+        console.log(`[BREVO] Password reset email successfully dispatched to: ${user.email}`);
       } catch (emailErr) {
-        emailError = emailErr?.message || 'Email delivery failed';
-        console.error('Resend delivery error:', emailErr);
+        emailError = emailErr?.response?.text || emailErr?.message || 'Email delivery failed';
+        console.error('Brevo delivery error:', emailErr?.response?.text || emailErr);
       }
     } else {
-      console.log(`\n✉️ [RESEND_API_KEY NOT CONFIGURED] Reset link for ${user.email}: ${resetUrl}\n`);
+      console.log(`\n[BREVO_API_KEY NOT CONFIGURED] Reset link for ${user.email}: ${resetUrl}\n`);
     }
 
     return res.status(200).json({
@@ -304,7 +320,7 @@ async function resetPassword(req, res) {
       [passwordHash, user.id]
     );
 
-    console.log(`🔐 Password successfully updated for user ID: ${user.id} (${user.email})`);
+    console.log(`Password successfully updated for user ID: ${user.id} (${user.email})`);
 
     return res.status(200).json({
       message: 'Password updated successfully! You can now log in with your new password.',
@@ -314,7 +330,6 @@ async function resetPassword(req, res) {
     return res.status(500).json({ message: 'Failed to reset password. Please try again.' });
   }
 }
-
 
 /**
  * Automatically ensures password recovery columns exist in PostgreSQL on startup.
@@ -333,4 +348,3 @@ async function initAuthColumns() {
 }
 
 module.exports = { register, login, logout, getCurrentUser, forgotPassword, resetPassword, initAuthColumns };
-
