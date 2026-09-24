@@ -29,33 +29,38 @@ const sendOtpEmail = async (toEmail, otp, resetUrl) => {
   email.to = [{ email: toEmail }];
   email.subject = 'Your LakBye password reset code';
   email.htmlContent = `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; border: 1px solid #eaeaea; border-radius: 12px; background-color: #ffffff;">
-      <div style="margin-bottom: 20px;">
-        <h1 style="color: #f05a28; font-size: 24px; font-weight: 800; margin: 0;">LakBye</h1>
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px 28px; border: 1px solid #e5e7eb; border-radius: 16px; background-color: #ffffff; box-sizing: border-box;">
+      <div style="margin-bottom: 24px; text-align: left;">
+        <img src="https://raw.githubusercontent.com/enmonwho/TPWA-ITS122P-FRONTEND/main/src/assets/lakbye-logo.png" alt="LakBye" width="140" style="display: block; width: 140px; max-width: 100%; height: auto; border: 0; outline: none; font-size: 24px; font-weight: 800; color: #f05a28;" />
       </div>
-      <h2 style="color: #111; margin-bottom: 12px; font-size: 18px;">Reset Your Password</h2>
-      <p style="color: #555; font-size: 15px; line-height: 1.5;">
-        Your reset code is: <strong style="font-size: 18px; color: #f05a28; letter-spacing: 1px;">${otp}</strong>.
-      </p>
-      <p style="color: #555; font-size: 14px; line-height: 1.5;">
-        This code expires in 30 minutes.
+      <h2 style="color: #111827; margin: 0 0 12px 0; font-size: 20px; font-weight: 700;">Reset Your Password</h2>
+      <p style="color: #4b5563; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+        Hello, we received a request to reset the password for your LakBye account. Click the button below to choose a new password:
       </p>
       ${
         resetUrl
-          ? `<div style="margin: 28px 0;">
-              <a href="${resetUrl}" style="background-color: #f05a28; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">
-                Reset Password Link
+          ? `<div style="margin: 24px 0 28px 0; text-align: left;">
+              <a href="${resetUrl}" style="background-color: #f05a28; color: #ffffff; text-decoration: none; padding: 13px 30px; border-radius: 67px; font-weight: 700; font-size: 14px; display: inline-block; box-shadow: 0 4px 6px -1px rgba(240, 90, 40, 0.25);">
+                Reset Password
               </a>
             </div>
-            <p style="color: #888; font-size: 13px; line-height: 1.5;">
-              If you are having trouble clicking the button, copy and paste this URL into your browser:<br/>
-              <a href="${resetUrl}" style="color: #f05a28; word-break: break-all;">${resetUrl}</a>
+            <p style="color: #6b7280; font-size: 13px; line-height: 1.5; margin: 0 0 16px 0;">
+              This password reset link will expire in <strong>30 minutes</strong> for your security.
+            </p>
+            <p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 0 0 20px 0;">
+              If the button above doesn't work, copy and paste this link into your browser:<br/>
+              <a href="${resetUrl}" style="color: #f05a28; word-break: break-all; text-decoration: underline;">${resetUrl}</a>
             </p>`
-          : ''
+          : `<p style="color: #555; font-size: 15px; line-height: 1.5;">
+              Your reset code is: <strong style="font-size: 18px; color: #f05a28; letter-spacing: 1px;">${otp}</strong>.
+            </p>
+            <p style="color: #6b7280; font-size: 13px; line-height: 1.5;">
+              This code expires in 30 minutes.
+            </p>`
       }
-      <hr style="border: none; border-top: 1px solid #eaeaea; margin: 24px 0;" />
-      <p style="color: #aaa; font-size: 12px; line-height: 1.4;">
-        If you did not request this password reset, you can safely ignore this email.
+      <hr style="border: none; border-top: 1px solid #f3f4f6; margin: 24px 0;" />
+      <p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 0;">
+        If you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.
       </p>
     </div>
   `;
