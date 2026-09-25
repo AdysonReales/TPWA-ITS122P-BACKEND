@@ -41,8 +41,13 @@ CREATE TABLE users (
     email          VARCHAR(150) NOT NULL UNIQUE,
     password_hash  VARCHAR(255) NOT NULL,
     role           user_role NOT NULL DEFAULT 'customer',
-    is_active      BOOLEAN NOT NULL DEFAULT TRUE,   -- supports admin activate/deactivate
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    is_active              BOOLEAN NOT NULL DEFAULT TRUE,   -- supports admin activate/deactivate
+    is_verified            BOOLEAN DEFAULT FALSE,
+    verify_otp             VARCHAR(6),
+    verify_otp_expires_at  TIMESTAMPTZ,
+    reset_password_token   VARCHAR(255),
+    reset_password_expires TIMESTAMPTZ,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ============================================================
@@ -232,3 +237,13 @@ CREATE TABLE IF NOT EXISTS expenses (
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_expenses_trip_id ON expenses(trip_id);
+
+
+-- ============================================================
+-- Migrations for existing databases
+-- ============================================================
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_password_token VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_password_expires TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_otp VARCHAR(6);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_otp_expires_at TIMESTAMPTZ;
