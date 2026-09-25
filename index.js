@@ -16,6 +16,7 @@ const logRoutes = require('./routes/logs.routes');
 const expenseRoutes = require('./routes/expenses.routes');
 const { initExpensesTable } = require('./controllers/expenses.controller');
 const { initAuthColumns } = require('./controllers/auth.controller');
+const { initDestinationsTable } = require('./controllers/destinations.controller');
 const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
@@ -104,4 +105,5 @@ app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   initExpensesTable();
   initAuthColumns();
+  initDestinationsTable();
 });

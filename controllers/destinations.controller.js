@@ -1,5 +1,30 @@
 const pool = require('../config/db');
 
+async function initDestinationsTable() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS destinations (
+        id SERIAL PRIMARY KEY,
+        trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+        location_name VARCHAR(150) NOT NULL,
+        latitude DECIMAL(10, 7),
+        longitude DECIMAL(10, 7),
+        order_sequence INTEGER NOT NULL DEFAULT 1
+      );
+      CREATE INDEX IF NOT EXISTS idx_destinations_trip ON destinations(trip_id);
+    `);
+    try {
+      await pool.query("SELECT setval(pg_get_serial_sequence('destinations', 'id'), COALESCE(MAX(id), 0) + 1, false) FROM destinations;");
+    } catch (seqErr) {
+      console.warn('Sequence sync warning:', seqErr.message);
+    }
+    console.log('Destinations table and sequence verified.');
+  } catch (err) {
+    console.error('Failed to verify destinations table:', err);
+  }
+}
+
+
 // Shared helper: fetch a trip and verify the requesting user may modify it.
 async function getAccessibleTrip(tripId, user) {
   const result = await pool.query('SELECT * FROM trips WHERE id = $1', [tripId]);
@@ -67,7 +92,7 @@ async function createDestination(req, res) {
       `INSERT INTO destinations (trip_id, location_name, latitude, longitude, order_sequence)
        VALUES ($1, $2, $3, $4, COALESCE($5, 1))
        RETURNING *`,
-      [trip_id, location_name, latitude, longitude, order_sequence]
+      [trip_id, location_name, latitude ?? null, longitude ?? null, order_sequence ?? 1]
     );
 
     return res.status(201).json({ message: 'Destination added.', destination: result.rows[0] });
@@ -129,6 +154,7 @@ async function deleteDestination(req, res) {
 }
 
 module.exports = {
+  initDestinationsTable,
   getDestinations,
   getDestinationById,
   createDestination,
