@@ -1,4 +1,4 @@
-﻿require('dotenv').config();
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
@@ -14,9 +14,11 @@ const bookingRoutes = require('./routes/bookings.routes');
 const notificationRoutes = require('./routes/notifications.routes');
 const logRoutes = require('./routes/logs.routes');
 const expenseRoutes = require('./routes/expenses.routes');
+const countryProfilesRoutes = require('./routes/countryProfiles.routes');
 const { initExpensesTable } = require('./controllers/expenses.controller');
 const { initAuthColumns } = require('./controllers/auth.controller');
 const { initDestinationsTable } = require('./controllers/destinations.controller');
+const { initCountryProfilesTable } = require('./controllers/countryProfiles.controller');
 const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
@@ -88,6 +90,7 @@ app.use('/api/activities', activityRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/logs', logRoutes);
+app.use('/api/country-profiles', countryProfilesRoutes);
 app.use('/api/admin', adminRoutes);
 
 // Increase payload size limit for JSON and URL-encoded data to handle larger requests (e.g., images, large JSON objects)
@@ -106,4 +109,5 @@ app.listen(PORT, () => {
   initExpensesTable();
   initAuthColumns();
   initDestinationsTable();
+  initCountryProfilesTable();
 });
