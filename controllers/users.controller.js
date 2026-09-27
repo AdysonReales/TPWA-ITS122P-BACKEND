@@ -77,7 +77,55 @@ async function updateUser(req, res) {
     const { id } = req.params;
     const { name, full_name, username, bio, avatar_url, password, role, is_active } = req.body;
 
-    // Update user in PostgreSQL database including username, bio, and avatar_url
+    let passwordHash = null;
+    let updatedPastPasswords = null;
+
+    if (password) {
+      if (password.length < 8) {
+        return res.status(400).json({ message: 'Password must be at least 8 characters long.' });
+      }
+
+      // Check user exists and inspect current / past passwords
+      const existingRes = await pool.query(
+        'SELECT password_hash, past_passwords FROM users WHERE id = $1',
+        [id]
+      );
+      if (existingRes.rows.length === 0) {
+        return res.status(404).json({ message: 'User not found.' });
+      }
+
+      const existingUser = existingRes.rows[0];
+
+      // 1. Prevent reusing current password
+      if (existingUser.password_hash) {
+        const isCurrent = await bcrypt.compare(password, existingUser.password_hash);
+        if (isCurrent) {
+          return res.status(400).json({
+            message: 'New password cannot be the same as your current password.',
+          });
+        }
+      }
+
+      // 2. Prevent reusing past passwords
+      const pastPasswords = Array.isArray(existingUser.past_passwords) ? existingUser.past_passwords : [];
+      for (const pastHash of pastPasswords) {
+        if (pastHash) {
+          const isPast = await bcrypt.compare(password, pastHash);
+          if (isPast) {
+            return res.status(400).json({
+              message: 'New password cannot be the same as any of your previous passwords.',
+            });
+          }
+        }
+      }
+
+      passwordHash = await bcrypt.hash(password, 10);
+      updatedPastPasswords = existingUser.password_hash
+        ? [...pastPasswords, existingUser.password_hash].slice(-5)
+        : pastPasswords;
+    }
+
+    // Update user in PostgreSQL database including username, bio, avatar_url, and password_hash
     const result = await pool.query(
       `UPDATE users
        SET full_name = COALESCE($1, full_name),
@@ -85,8 +133,10 @@ async function updateUser(req, res) {
            bio = COALESCE($3, bio),
            avatar_url = COALESCE($4, avatar_url),
            role = COALESCE($5, role),
-           is_active = COALESCE($6, is_active)
-       WHERE id = $7
+           is_active = COALESCE($6, is_active),
+           password_hash = COALESCE($7, password_hash),
+           past_passwords = COALESCE($8, past_passwords)
+       WHERE id = $9
        RETURNING id, full_name, username, email, role, bio, avatar_url, is_active`,
       [
         full_name || name,
@@ -95,6 +145,8 @@ async function updateUser(req, res) {
         avatar_url,
         role,
         is_active,
+        passwordHash,
+        updatedPastPasswords,
         id,
       ]
     );
