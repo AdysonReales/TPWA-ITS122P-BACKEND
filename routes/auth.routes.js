@@ -9,6 +9,7 @@ const {
   resetPassword,
   verifyEmail,
   resendVerification,
+  cancelRegistration,
 } = require('../controllers/auth.controller');
 const { authenticateToken } = require('../middleware/auth');
 
@@ -20,6 +21,7 @@ router.get('/me', authenticateToken, getCurrentUser);
 // Email verification routes
 router.post('/verify-email', verifyEmail);
 router.post('/resend-verification', resendVerification);
+router.post('/cancel-registration', cancelRegistration);
 
 // Password recovery routes
 router.post('/forgot-password', forgotPassword);

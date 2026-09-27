@@ -143,9 +143,14 @@ async function register(req, res) {
     void role; // ignored on purpose for public registration
 
     const cleanEmail = email.toLowerCase().trim();
-    const existing = await pool.query('SELECT id FROM users WHERE LOWER(email) = $1', [cleanEmail]);
+    const existing = await pool.query('SELECT id, is_verified FROM users WHERE LOWER(email) = $1', [cleanEmail]);
     if (existing.rows.length > 0) {
-      return res.status(409).json({ message: 'Email is already registered.' });
+      const existingUser = existing.rows[0];
+      if (existingUser.is_verified) {
+        return res.status(409).json({ message: 'Email is already registered.' });
+      }
+      // If previous registration was never verified (abandoned), remove the stale record so this registration succeeds cleanly
+      await pool.query('DELETE FROM users WHERE id = $1 AND is_verified = FALSE', [existingUser.id]);
     }
 
     const password_hash = await bcrypt.hash(password, SALT_ROUNDS);
@@ -555,6 +560,40 @@ async function initAuthColumns() {
   }
 }
 
+
+// POST /api/auth/cancel-registration
+async function cancelRegistration(req, res) {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required.' });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+
+    // Only allow cancelling unverified registrations
+    const result = await pool.query(
+      'DELETE FROM users WHERE LOWER(email) = $1 AND is_verified = FALSE RETURNING id, email',
+      [cleanEmail]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(200).json({
+        message: 'No pending unverified registration found to cancel.',
+      });
+    }
+
+    console.log(`[AUTH] Cancelled pending unverified registration for: ${cleanEmail}`);
+    return res.status(200).json({
+      message: 'Pending registration cancelled successfully.',
+    });
+  } catch (err) {
+    console.error('Cancel registration error:', err);
+    return res.status(500).json({ message: 'Server error during cancellation.' });
+  }
+}
+
 module.exports = {
   register,
   login,
@@ -564,5 +603,6 @@ module.exports = {
   resetPassword,
   verifyEmail,
   resendVerification,
+  cancelRegistration,
   initAuthColumns,
 };
