@@ -498,7 +498,7 @@ async function resetPassword(req, res) {
 
     // 1. Locate user by matching token and verifying timestamptz expiry against NOW()
     const userRes = await pool.query(
-      `SELECT id, email 
+      `SELECT id, email, password_hash, past_passwords 
        FROM users 
        WHERE reset_password_token = $1 
          AND reset_password_expires > NOW()`,
@@ -512,18 +512,47 @@ async function resetPassword(req, res) {
       });
     }
 
-    // 2. Hash new password
+    // 2. Prevent reusing current password
+    if (user.password_hash) {
+      const isCurrentPassword = await bcrypt.compare(password, user.password_hash);
+      if (isCurrentPassword) {
+        return res.status(400).json({
+          message: 'New password cannot be the same as your current password.',
+        });
+      }
+    }
+
+    // 3. Prevent reusing previous passwords (stored in past_passwords)
+    const pastPasswords = Array.isArray(user.past_passwords) ? user.past_passwords : [];
+    for (const pastHash of pastPasswords) {
+      if (pastHash) {
+        const isPastPassword = await bcrypt.compare(password, pastHash);
+        if (isPastPassword) {
+          return res.status(400).json({
+            message: 'New password cannot be the same as any of your previous passwords.',
+          });
+        }
+      }
+    }
+
+    // 4. Hash new password
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    // 3. Update password and clear token columns in the database
+    // Save current password hash to past_passwords history (keeping last 5)
+    const updatedHistory = user.password_hash
+      ? [...pastPasswords, user.password_hash].slice(-5)
+      : pastPasswords;
+
+    // 5. Update password, past_passwords history, and clear token columns in the database
     await pool.query(
       `UPDATE users 
        SET password_hash = $1, 
+           past_passwords = $2, 
            reset_password_token = NULL, 
            reset_password_expires = NULL 
-       WHERE id = $2`,
-      [passwordHash, user.id]
+       WHERE id = $3`,
+      [passwordHash, updatedHistory, user.id]
     );
 
     console.log(`Password successfully updated for user ID: ${user.id} (${user.email})`);
@@ -548,7 +577,9 @@ async function initAuthColumns() {
       ADD COLUMN IF NOT EXISTS reset_password_expires TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS verify_otp VARCHAR(6),
-      ADD COLUMN IF NOT EXISTS verify_otp_expires_at TIMESTAMPTZ;
+      ADD COLUMN IF NOT EXISTS verify_otp_expires_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS past_passwords TEXT[] DEFAULT '{}';
+      UPDATE users SET past_passwords = '{}' WHERE past_passwords IS NULL;
     `);
     // Ensure any preexisting admin/staff accounts remain verified
     await pool.query(`
