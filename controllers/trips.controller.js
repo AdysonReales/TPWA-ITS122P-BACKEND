@@ -172,4 +172,19 @@ async function deleteTrip(req, res) {
   }
 }
 
-module.exports = { getTrips, getTripById, createTrip, updateTrip, deleteTrip };
+
+// Verify trips table has cover_photo and visibility columns
+async function initTripColumns() {
+  try {
+    await pool.query(`
+      ALTER TABLE trips
+      ADD COLUMN IF NOT EXISTS cover_photo TEXT,
+      ADD COLUMN IF NOT EXISTS visibility VARCHAR(50) DEFAULT 'private';
+    `);
+    console.log('Trip columns (cover_photo, visibility) verified.');
+  } catch (err) {
+    console.error('Failed to verify trip columns:', err);
+  }
+}
+
+module.exports = { getTrips, getTripById, createTrip, updateTrip, deleteTrip, initTripColumns };
