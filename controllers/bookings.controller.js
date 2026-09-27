@@ -4,10 +4,43 @@ const { logAction } = require('../utils/logger');
 // Normalizing helpers between Postgres Title-Case enum ('Pending', 'Confirmed'...)
 // and public API lowercase contract ('pending', 'confirmed'...)
 const toDbStatus = (s) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
-const toApiStatus = (s) => s.toLowerCase();
+const toApiStatus = (s) => (s ? s.toLowerCase() : 'pending');
 const normalizeBookingRow = (row) => (row ? { ...row, status: toApiStatus(row.status) } : row);
 
 const VALID_STATUSES = ['pending', 'confirmed', 'completed', 'cancelled'];
+
+async function initBookingsTable() {
+  try {
+    await pool.query(`
+      ALTER TABLE bookings ALTER COLUMN activity_id DROP NOT NULL;
+      ALTER TABLE bookings ADD COLUMN IF NOT EXISTS trip_id INTEGER REFERENCES trips(id) ON DELETE SET NULL;
+      ALTER TABLE bookings ADD COLUMN IF NOT EXISTS destination_id INTEGER REFERENCES destinations(id) ON DELETE SET NULL;
+      ALTER TABLE bookings ADD COLUMN IF NOT EXISTS custom_title VARCHAR(150);
+      ALTER TABLE bookings ADD COLUMN IF NOT EXISTS custom_type VARCHAR(50);
+      ALTER TABLE bookings ADD COLUMN IF NOT EXISTS custom_location VARCHAR(150);
+      ALTER TABLE bookings ADD COLUMN IF NOT EXISTS booking_date TIMESTAMPTZ;
+      ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cost DECIMAL(10, 2);
+      ALTER TABLE bookings ADD COLUMN IF NOT EXISTS notes TEXT;
+      ALTER TABLE bookings ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+
+      DO $$ 
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'destinations' AND column_name = 'locationname'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'destinations' AND column_name = 'location_name'
+        ) THEN
+          ALTER TABLE destinations RENAME COLUMN locationname TO location_name;
+        END IF;
+      END $$;
+    `);
+    console.log('Bookings table verified and extended.');
+  } catch (err) {
+    console.warn('Bookings table extension notice:', err.message);
+  }
+}
 
 // GET /api/bookings  (optional ?status=pending for the staff queue)
 // Customers see only their own bookings. Vendors see bookings for their own activities.
@@ -15,31 +48,37 @@ const VALID_STATUSES = ['pending', 'confirmed', 'completed', 'cancelled'];
 async function getBookings(req, res) {
   try {
     const { id: userId, role } = req.user;
-    const { status } = req.query;
+    const { status, trip_id } = req.query;
 
     let text;
     const values = [];
 
+    const baseSelect = `
+      SELECT b.*, 
+             u.full_name AS customer_name, 
+             u.email AS customer_email,
+             COALESCE(b.custom_title, a.title) AS activity_title,
+             COALESCE(b.cost, a.cost) AS resolved_cost,
+             COALESCE(b.custom_type, 'activity') AS resolved_type,
+             COALESCE(b.custom_location, d.location_name) AS resolved_location,
+             t.title AS trip_title
+      FROM bookings b 
+      LEFT JOIN users u ON u.id = b.user_id 
+      LEFT JOIN activities a ON a.id = b.activity_id 
+      LEFT JOIN destinations d ON d.id = COALESCE(b.destination_id, a.destination_id)
+      LEFT JOIN trips t ON t.id = COALESCE(b.trip_id, d.trip_id)
+    `;
+
     if (role === 'customer') {
       values.push(userId);
-      text = `SELECT b.*, u.full_name AS customer_name, a.title AS activity_title 
-              FROM bookings b 
-              LEFT JOIN users u ON u.id = b.user_id 
-              LEFT JOIN activities a ON a.id = b.activity_id 
-              WHERE b.user_id = $1`;
+      text = `${baseSelect} WHERE b.user_id = $1`;
     } else if (role === 'vendor') {
       values.push(userId);
-      text = `SELECT b.*, u.full_name AS customer_name, a.title AS activity_title 
-              FROM bookings b
-              LEFT JOIN users u ON u.id = b.user_id
-              JOIN activities a ON a.id = b.activity_id
-              JOIN vendor_profiles v ON v.id = a.vendor_id
+      text = `${baseSelect}
+              LEFT JOIN vendor_profiles v ON v.id = a.vendor_id
               WHERE v.user_id = $1`;
     } else {
-      text = `SELECT b.*, u.full_name AS customer_name, a.title AS activity_title 
-              FROM bookings b 
-              LEFT JOIN users u ON u.id = b.user_id 
-              LEFT JOIN activities a ON a.id = b.activity_id`;
+      text = baseSelect;
     }
 
     if (status) {
@@ -48,10 +87,16 @@ async function getBookings(req, res) {
       }
       values.push(toDbStatus(status));
       text += values.length === 1 ? ' WHERE' : ' AND';
-      text += ` b.status = ${values.length}`;
+      text += ` b.status = $${values.length}`;
     }
 
-    text += ' ORDER BY b.created_at DESC';
+    if (trip_id) {
+      values.push(trip_id);
+      text += values.length === 1 ? ' WHERE' : ' AND';
+      text += ` (b.trip_id = $${values.length} OR d.trip_id = $${values.length})`;
+    }
+
+    text += ' ORDER BY b.submitted_at DESC, b.id DESC';
 
     const result = await pool.query(text, values);
     return res.status(200).json({ bookings: result.rows.map(normalizeBookingRow) });
@@ -62,28 +107,66 @@ async function getBookings(req, res) {
 }
 
 // POST /api/bookings  (customer submits a request; status starts as Pending)
+// Supports both catalog activity bookings and custom manual bookings (hotel, activity)
 async function createBooking(req, res) {
   try {
     const { id: userId } = req.user;
-    const { activity_id } = req.body;
+    const {
+      activity_id,
+      trip_id,
+      destination_id,
+      custom_title,
+      custom_type,
+      custom_location,
+      booking_date,
+      cost,
+      notes,
+    } = req.body;
 
-    if (!activity_id) {
-      return res.status(400).json({ message: 'activity_id is required.' });
+    if (!activity_id && (!custom_title || !custom_title.trim())) {
+      return res.status(400).json({
+        message: 'Either activity_id or custom_title is required to create a booking.',
+      });
     }
 
-    const activityCheck = await pool.query('SELECT id FROM activities WHERE id = $1', [activity_id]);
-    if (activityCheck.rows.length === 0) {
-      return res.status(404).json({ message: 'Activity not found.' });
+    if (activity_id) {
+      const activityCheck = await pool.query('SELECT id, cost FROM activities WHERE id = $1', [activity_id]);
+      if (activityCheck.rows.length === 0) {
+        return res.status(404).json({ message: 'Activity not found.' });
+      }
     }
 
     const result = await pool.query(
-      `INSERT INTO bookings (user_id, activity_id, status)
-       VALUES ($1, $2, $3) RETURNING *`,
-      [userId, activity_id, toDbStatus('pending')]
+      `INSERT INTO bookings (
+        user_id, activity_id, status, trip_id, destination_id,
+        custom_title, custom_type, custom_location, booking_date, cost, notes
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING *`,
+      [
+        userId,
+        activity_id || null,
+        toDbStatus('pending'),
+        trip_id ? parseInt(trip_id, 10) : null,
+        destination_id ? parseInt(destination_id, 10) : null,
+        custom_title ? custom_title.trim() : null,
+        custom_type ? custom_type.trim() : (activity_id ? 'activity' : 'hotel'),
+        custom_location ? custom_location.trim() : null,
+        booking_date || null,
+        cost !== undefined && cost !== null && cost !== '' ? parseFloat(cost) : null,
+        notes ? notes.trim() : null,
+      ]
     );
 
     const booking = normalizeBookingRow(result.rows[0]);
-    logAction({ userId, actionType: 'CREATE_BOOKING', tableAffected: 'bookings', recordId: booking.id, description: `Submitted booking for activity #${activity_id}` });
+    const bookingTitle = custom_title || `Activity #${activity_id}`;
+    logAction({
+      userId,
+      actionType: 'CREATE_BOOKING',
+      tableAffected: 'bookings',
+      recordId: booking.id,
+      description: `Submitted booking for "${bookingTitle}"`,
+    });
 
     await pool.query(
       `INSERT INTO notifications (user_id, title, message, type)
@@ -98,14 +181,14 @@ async function createBooking(req, res) {
   }
 }
 
-// PUT /api/bookings/:id  (staff/admin confirm or reject; used for the approval workflow)
+// PUT /api/bookings/:id  (staff/admin confirm, reject, or assign/update price)
 async function updateBookingStatus(req, res) {
   try {
     const { id } = req.params;
     const { id: userId } = req.user;
-    const { status, rejection_reason } = req.body;
+    const { status, rejection_reason, cost } = req.body;
 
-    if (!status || !VALID_STATUSES.includes(status)) {
+    if (status && !VALID_STATUSES.includes(status)) {
       return res.status(400).json({ message: `status must be one of: ${VALID_STATUSES.join(', ')}` });
     }
 
@@ -114,20 +197,34 @@ async function updateBookingStatus(req, res) {
       return res.status(404).json({ message: 'Booking not found.' });
     }
 
+    const currentBooking = existing.rows[0];
+    const newStatus = status ? toDbStatus(status) : currentBooking.status;
+    const newCost = cost !== undefined && cost !== null && cost !== '' ? parseFloat(cost) : currentBooking.cost;
+    const newReason = rejection_reason !== undefined ? rejection_reason : currentBooking.rejection_reason;
+
     const result = await pool.query(
-      'UPDATE bookings SET status = $1 WHERE id = $2 RETURNING *',
-      [toDbStatus(status), id]
+      `UPDATE bookings 
+       SET status = $1, cost = $2, rejection_reason = $3
+       WHERE id = $4
+       RETURNING *`,
+      [newStatus, newCost, newReason, id]
     );
     const booking = normalizeBookingRow(result.rows[0]);
 
-    logAction({ userId, actionType: 'UPDATE_BOOKING', tableAffected: 'bookings', recordId: id, description: `Booking #${id} set to ${status}` });
+    logAction({
+      userId,
+      actionType: 'UPDATE_BOOKING',
+      tableAffected: 'bookings',
+      recordId: id,
+      description: `Booking #${id} updated: status=${booking.status}, cost=${newCost}`,
+    });
 
     const notifMessage =
-      status === 'confirmed'
-        ? 'Your booking has been confirmed!'
-        : status === 'cancelled'
-        ? `Your booking was rejected.${rejection_reason ? ' Reason: ' + rejection_reason : ''}`
-        : `Your booking status is now: ${status}.`;
+      booking.status === 'confirmed'
+        ? `Your booking has been confirmed!${newCost ? ` Confirmed cost: ₱${newCost}` : ''}`
+        : booking.status === 'cancelled'
+        ? `Your booking was rejected.${newReason ? ' Reason: ' + newReason : ''}`
+        : `Your booking status is now: ${booking.status}.`;
 
     await pool.query(
       `INSERT INTO notifications (user_id, title, message, type)
@@ -142,4 +239,5 @@ async function updateBookingStatus(req, res) {
   }
 }
 
-module.exports = { getBookings, createBooking, updateBookingStatus };
+module.exports = { initBookingsTable, getBookings, createBooking, updateBookingStatus };
+

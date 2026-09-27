@@ -1,4 +1,4 @@
-﻿require('dotenv').config();
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
@@ -14,10 +14,18 @@ const bookingRoutes = require('./routes/bookings.routes');
 const notificationRoutes = require('./routes/notifications.routes');
 const logRoutes = require('./routes/logs.routes');
 const expenseRoutes = require('./routes/expenses.routes');
+const countryProfilesRoutes = require('./routes/countryProfiles.routes');
+const feedbackRoutes = require('./routes/feedback.routes');
 const { initExpensesTable } = require('./controllers/expenses.controller');
 const { initAuthColumns } = require('./controllers/auth.controller');
 const { initDestinationsTable } = require('./controllers/destinations.controller');
+<<<<<<< HEAD
 const { initTripColumns } = require('./controllers/trips.controller');
+=======
+const { initCountryProfilesTable } = require('./controllers/countryProfiles.controller');
+const { initFeedbackTable } = require('./controllers/feedback.controller');
+const { initBookingsTable } = require('./controllers/bookings.controller');
+>>>>>>> feature/country-profiles-schema-api
 const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
@@ -65,6 +73,10 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
+<<<<<<< HEAD
+=======
+// Generous payload size limit for JSON and URL-encoded data placed BEFORE routes to handle cover image uploads
+>>>>>>> feature/country-profiles-schema-api
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ limit: '15mb', extended: true }));
 app.use(cookieParser());
@@ -90,11 +102,9 @@ app.use('/api/activities', activityRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/logs', logRoutes);
+app.use('/api/country-profiles', countryProfilesRoutes);
+app.use('/api/feedback', feedbackRoutes);
 app.use('/api/admin', adminRoutes);
-
-// Increase payload size limit for JSON and URL-encoded data to handle larger requests (e.g., images, large JSON objects)
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // 404 handler
 app.use((req, res) => {
@@ -108,5 +118,11 @@ app.listen(PORT, () => {
   initExpensesTable();
   initAuthColumns();
   initDestinationsTable();
+<<<<<<< HEAD
   initTripColumns();
+=======
+  initCountryProfilesTable();
+  initFeedbackTable();
+  initBookingsTable();
+>>>>>>> feature/country-profiles-schema-api
 });

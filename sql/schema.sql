@@ -247,3 +247,158 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_password_expires TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_otp VARCHAR(6);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_otp_expires_at TIMESTAMPTZ;
+
+-- ============================================================
+-- 11. COUNTRY_PROFILES (Explore Country Insights & Cost Tiers)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS country_profiles (
+    id                   SERIAL PRIMARY KEY,
+    country_name         VARCHAR(150) NOT NULL UNIQUE,
+    continent            VARCHAR(100) NOT NULL,
+    capital              VARCHAR(100),
+    language             VARCHAR(100),
+    currency             VARCHAR(50),
+    population           BIGINT,
+    description          TEXT,
+    best_destinations    JSONB NOT NULL DEFAULT '[]'::jsonb,
+    budget_daily_cost    NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    midrange_daily_cost  NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    luxury_daily_cost    NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    image_url            TEXT,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Enable RLS and public read access policy
+ALTER TABLE country_profiles ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies 
+        WHERE tablename = 'country_profiles' 
+        AND policyname = 'Allow public read access on country_profiles'
+    ) THEN
+        CREATE POLICY "Allow public read access on country_profiles"
+        ON country_profiles
+        FOR SELECT
+        TO public
+        USING (true);
+    END IF;
+END $$;
+
+-- Seed initial curated country profiles
+INSERT INTO country_profiles (
+    country_name, continent, capital, language, currency, population, description,
+    best_destinations, budget_daily_cost, midrange_daily_cost, luxury_daily_cost, image_url
+) VALUES
+(
+    'Philippines',
+    'Asia',
+    'Manila',
+    'Filipino, English',
+    'PHP',
+    115000000,
+    'Archipelago of over 7,000 islands known for powdery white-sand beaches, emerald waters, warm hospitality, and vibrant dive sites.',
+    '["Boracay", "Palawan (El Nido & Coron)", "Siargao Island", "Cebu & Bohol", "Batanes"]'::jsonb,
+    1800.00,
+    4500.00,
+    14000.00,
+    'https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?auto=format&fit=crop&w=1200&q=80'
+),
+(
+    'Japan',
+    'Asia',
+    'Tokyo',
+    'Japanese',
+    'JPY',
+    125000000,
+    'A harmonious blend of centuries-old Shinto traditions, serene bamboo groves, hyper-modern futuristic metropolises, and world-class culinary craftsmanship.',
+    '["Kyoto Ancient Temples", "Tokyo Shibuya & Shinjuku", "Mount Fuji & Hakone", "Osaka Dotonbori", "Hokkaido Furano"]'::jsonb,
+    3500.00,
+    8500.00,
+    25000.00,
+    'https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?auto=format&fit=crop&w=1200&q=80'
+),
+(
+    'France',
+    'Europe',
+    'Paris',
+    'French',
+    'EUR',
+    67800000,
+    'Famous for world-defining art museums, iconic monuments, world-class gastronomy, sun-drenched Côte d''Azur coastlines, and picturesque vineyards.',
+    '["Paris & Versailles", "French Riviera (Nice & Cannes)", "Provence Lavender Fields", "Mont Saint-Michel", "Chamonix Mont-Blanc"]'::jsonb,
+    4200.00,
+    9800.00,
+    28000.00,
+    'https://images.unsplash.com/photo-1502602898657-3e91760cbb34?auto=format&fit=crop&w=1200&q=80'
+),
+(
+    'Italy',
+    'Europe',
+    'Rome',
+    'Italian',
+    'EUR',
+    59000000,
+    'A living open-air museum boasting Renaissance masterpieces, dramatic Amalfi cliffside towns, Venetian canals, and mouthwatering regional cuisine.',
+    '["Rome Colosseum & Vatican", "Florence & Tuscany", "Venice Canals", "Amalfi Coast & Positano", "Cinque Terre"]'::jsonb,
+    4000.00,
+    9200.00,
+    26000.00,
+    'https://images.unsplash.com/photo-1516483638261-f4dbaf036963?auto=format&fit=crop&w=1200&q=80'
+),
+(
+    'United States',
+    'Americas',
+    'Washington, D.C.',
+    'English',
+    'USD',
+    335000000,
+    'A vast and diverse continent-spanning nation featuring dramatic national parks, world-famous skylines, coast-to-coast road trips, and global cultural hubs.',
+    '["New York City", "Grand Canyon National Park", "California Pacific Coast", "Hawaii (Maui & Oahu)", "Yellowstone"]'::jsonb,
+    4800.00,
+    11000.00,
+    32000.00,
+    'https://images.unsplash.com/photo-1485738422979-f5c462d49f74?auto=format&fit=crop&w=1200&q=80'
+)
+ON CONFLICT (country_name) DO NOTHING;
+
+-- ============================================================
+-- 12. FEEDBACK (Customer Testimonials & Moderation)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS feedback (
+    id             SERIAL PRIMARY KEY,
+    user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    country_name   VARCHAR(150) NOT NULL,
+    title          VARCHAR(150) NOT NULL,
+    comment        TEXT NOT NULL,
+    rating         INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+    status         VARCHAR(20) NOT NULL DEFAULT 'approved',
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status);
+CREATE INDEX IF NOT EXISTS idx_feedback_user_id ON feedback(user_id);
+
+-- Additional normalized extensions for destinations, expenses, and bookings
+ALTER TABLE destinations ADD COLUMN IF NOT EXISTS country VARCHAR(150);
+ALTER TABLE destinations ADD COLUMN IF NOT EXISTS parent_destination_id INTEGER REFERENCES destinations(id) ON DELETE CASCADE;
+ALTER TABLE destinations ADD COLUMN IF NOT EXISTS days INTEGER DEFAULT 1;
+ALTER TABLE destinations ADD COLUMN IF NOT EXISTS accommodation TEXT;
+ALTER TABLE destinations ADD COLUMN IF NOT EXISTS activities TEXT;
+ALTER TABLE destinations ADD COLUMN IF NOT EXISTS transportation TEXT;
+
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS destination_id INTEGER REFERENCES destinations(id) ON DELETE SET NULL;
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS country_name VARCHAR(150);
+
+ALTER TABLE bookings ALTER COLUMN activity_id DROP NOT NULL;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS trip_id INTEGER REFERENCES trips(id) ON DELETE SET NULL;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS destination_id INTEGER REFERENCES destinations(id) ON DELETE SET NULL;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS custom_title VARCHAR(150);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS custom_type VARCHAR(50);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS custom_location VARCHAR(150);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS booking_date TIMESTAMPTZ;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cost DECIMAL(10, 2);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+
+

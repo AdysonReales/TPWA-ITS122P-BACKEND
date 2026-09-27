@@ -1,4 +1,4 @@
-﻿const pool = require('../config/db');
+const pool = require('../config/db');
 const { logAction } = require('../utils/logger');
 
 /**
@@ -18,6 +18,8 @@ async function initExpensesTable() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_expenses_trip_id ON expenses(trip_id);
+      ALTER TABLE expenses ADD COLUMN IF NOT EXISTS destination_id INTEGER REFERENCES destinations(id) ON DELETE SET NULL;
+      ALTER TABLE expenses ADD COLUMN IF NOT EXISTS country_name VARCHAR(150);
     `);
     console.log('Expenses table verified / initialized successfully.');
   } catch (err) {
@@ -43,7 +45,7 @@ async function getTripBudget(req, res) {
     }
 
     const expensesResult = await pool.query(
-      `SELECT id, trip_id, name, items, category, cost::float, TO_CHAR(date, 'YYYY-MM-DD') AS date, created_at
+      `SELECT id, trip_id, name, items, category, cost::float, destination_id, country_name, TO_CHAR(date, 'YYYY-MM-DD') AS date, created_at
        FROM expenses
        WHERE trip_id = $1
        ORDER BY date DESC, id DESC`,
@@ -117,7 +119,7 @@ async function addExpense(req, res) {
   try {
     const { tripId } = req.params;
     const { id: userId, role } = req.user;
-    const { name, items, category, cost, date } = req.body;
+    const { name, items, category, cost, date, destination_id, country_name } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ message: 'Expense name is required.' });
@@ -147,11 +149,27 @@ async function addExpense(req, res) {
       return res.status(403).json({ message: 'You do not have access to this trip.' });
     }
 
+    const currentBudget = parseFloat(trip.total_budget || 0);
+    // Budget Protection: Prevent expenses exceeding remaining balance
+    if (parsedCost > currentBudget) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ message: 'This expense exceeds your remaining trip budget.' });
+    }
+
     const expenseInsert = await client.query(
-      `INSERT INTO expenses (trip_id, name, items, category, cost, date)
-       VALUES ($1, $2, $3, $4, $5, $6::date)
-       RETURNING id, trip_id, name, items, category, cost::float, TO_CHAR(date, 'YYYY-MM-DD') AS date, created_at`,
-      [tripId, name.trim(), parsedItems, expenseCategory, parsedCost, expenseDate]
+      `INSERT INTO expenses (trip_id, name, items, category, cost, date, destination_id, country_name)
+       VALUES ($1, $2, $3, $4, $5, $6::date, $7, $8)
+       RETURNING id, trip_id, name, items, category, cost::float, destination_id, country_name, TO_CHAR(date, 'YYYY-MM-DD') AS date, created_at`,
+      [
+        tripId,
+        name.trim(),
+        parsedItems,
+        expenseCategory,
+        parsedCost,
+        expenseDate,
+        destination_id ? parseInt(destination_id, 10) : null,
+        country_name ? country_name.trim() : null,
+      ]
     );
 
     const newExpense = expenseInsert.rows[0];
