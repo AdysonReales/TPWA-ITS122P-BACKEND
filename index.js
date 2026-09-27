@@ -15,10 +15,13 @@ const notificationRoutes = require('./routes/notifications.routes');
 const logRoutes = require('./routes/logs.routes');
 const expenseRoutes = require('./routes/expenses.routes');
 const countryProfilesRoutes = require('./routes/countryProfiles.routes');
+const feedbackRoutes = require('./routes/feedback.routes');
 const { initExpensesTable } = require('./controllers/expenses.controller');
 const { initAuthColumns } = require('./controllers/auth.controller');
 const { initDestinationsTable } = require('./controllers/destinations.controller');
 const { initCountryProfilesTable } = require('./controllers/countryProfiles.controller');
+const { initFeedbackTable } = require('./controllers/feedback.controller');
+const { initBookingsTable } = require('./controllers/bookings.controller');
 const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
@@ -66,7 +69,9 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-app.use(express.json());
+// Generous payload size limit for JSON and URL-encoded data placed BEFORE routes to handle cover image uploads
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ limit: '15mb', extended: true }));
 app.use(cookieParser());
 
 // Base Route & Health Check
@@ -91,11 +96,8 @@ app.use('/api/bookings', bookingRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/logs', logRoutes);
 app.use('/api/country-profiles', countryProfilesRoutes);
+app.use('/api/feedback', feedbackRoutes);
 app.use('/api/admin', adminRoutes);
-
-// Increase payload size limit for JSON and URL-encoded data to handle larger requests (e.g., images, large JSON objects)
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // 404 handler
 app.use((req, res) => {
@@ -110,4 +112,6 @@ app.listen(PORT, () => {
   initAuthColumns();
   initDestinationsTable();
   initCountryProfilesTable();
+  initFeedbackTable();
+  initBookingsTable();
 });

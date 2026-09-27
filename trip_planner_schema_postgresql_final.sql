@@ -363,3 +363,42 @@ INSERT INTO country_profiles (
 )
 ON CONFLICT (country_name) DO NOTHING;
 
+-- ============================================================
+-- 12. FEEDBACK (Customer Testimonials & Moderation)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS feedback (
+    id             SERIAL PRIMARY KEY,
+    user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    country_name   VARCHAR(150) NOT NULL,
+    title          VARCHAR(150) NOT NULL,
+    comment        TEXT NOT NULL,
+    rating         INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+    status         VARCHAR(20) NOT NULL DEFAULT 'approved',
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status);
+CREATE INDEX IF NOT EXISTS idx_feedback_user_id ON feedback(user_id);
+
+-- Additional normalized extensions for destinations, expenses, and bookings
+ALTER TABLE destinations ADD COLUMN IF NOT EXISTS country VARCHAR(150);
+ALTER TABLE destinations ADD COLUMN IF NOT EXISTS parent_destination_id INTEGER REFERENCES destinations(id) ON DELETE CASCADE;
+ALTER TABLE destinations ADD COLUMN IF NOT EXISTS days INTEGER DEFAULT 1;
+ALTER TABLE destinations ADD COLUMN IF NOT EXISTS accommodation TEXT;
+ALTER TABLE destinations ADD COLUMN IF NOT EXISTS activities TEXT;
+ALTER TABLE destinations ADD COLUMN IF NOT EXISTS transportation TEXT;
+
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS destination_id INTEGER REFERENCES destinations(id) ON DELETE SET NULL;
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS country_name VARCHAR(150);
+
+ALTER TABLE bookings ALTER COLUMN activity_id DROP NOT NULL;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS trip_id INTEGER REFERENCES trips(id) ON DELETE SET NULL;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS destination_id INTEGER REFERENCES destinations(id) ON DELETE SET NULL;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS custom_title VARCHAR(150);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS custom_type VARCHAR(50);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS custom_location VARCHAR(150);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS booking_date TIMESTAMPTZ;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cost DECIMAL(10, 2);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+
+

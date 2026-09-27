@@ -12,6 +12,25 @@ async function initDestinationsTable() {
         order_sequence INTEGER NOT NULL DEFAULT 1
       );
       CREATE INDEX IF NOT EXISTS idx_destinations_trip ON destinations(trip_id);
+      ALTER TABLE destinations ADD COLUMN IF NOT EXISTS country VARCHAR(150);
+      ALTER TABLE destinations ADD COLUMN IF NOT EXISTS parent_destination_id INTEGER REFERENCES destinations(id) ON DELETE CASCADE;
+      ALTER TABLE destinations ADD COLUMN IF NOT EXISTS days INTEGER DEFAULT 1;
+      ALTER TABLE destinations ADD COLUMN IF NOT EXISTS accommodation TEXT;
+      ALTER TABLE destinations ADD COLUMN IF NOT EXISTS activities TEXT;
+      ALTER TABLE destinations ADD COLUMN IF NOT EXISTS transportation TEXT;
+
+      DO $$ 
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'destinations' AND column_name = 'locationname'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'destinations' AND column_name = 'location_name'
+        ) THEN
+          ALTER TABLE destinations RENAME COLUMN locationname TO location_name;
+        END IF;
+      END $$;
     `);
     try {
       await pool.query("SELECT setval(pg_get_serial_sequence('destinations', 'id'), COALESCE(MAX(id), 0) + 1, false) FROM destinations;");
@@ -47,7 +66,7 @@ async function getDestinations(req, res) {
     if (!allowed) return res.status(403).json({ message: 'You do not have access to this trip.' });
 
     const result = await pool.query(
-      'SELECT * FROM destinations WHERE trip_id = $1 ORDER BY order_sequence ASC',
+      'SELECT * FROM destinations WHERE trip_id = $1 ORDER BY order_sequence ASC, id ASC',
       [trip_id]
     );
     return res.status(200).json({ destinations: result.rows });
@@ -78,7 +97,19 @@ async function getDestinationById(req, res) {
 // POST /api/destinations
 async function createDestination(req, res) {
   try {
-    const { trip_id, location_name, latitude, longitude, order_sequence } = req.body;
+    const {
+      trip_id,
+      location_name,
+      latitude,
+      longitude,
+      order_sequence,
+      country,
+      parent_destination_id,
+      days,
+      accommodation,
+      activities,
+      transportation,
+    } = req.body;
 
     if (!trip_id || !location_name) {
       return res.status(400).json({ message: 'trip_id and location_name are required.' });
@@ -89,10 +120,25 @@ async function createDestination(req, res) {
     if (!allowed) return res.status(403).json({ message: 'You do not have access to this trip.' });
 
     const result = await pool.query(
-      `INSERT INTO destinations (trip_id, location_name, latitude, longitude, order_sequence)
-       VALUES ($1, $2, $3, $4, COALESCE($5, 1))
+      `INSERT INTO destinations (
+        trip_id, location_name, latitude, longitude, order_sequence,
+        country, parent_destination_id, days, accommodation, activities, transportation
+       )
+       VALUES ($1, $2, $3, $4, COALESCE($5, 1), $6, $7, COALESCE($8, 1), $9, $10, $11)
        RETURNING *`,
-      [trip_id, location_name, latitude ?? null, longitude ?? null, order_sequence ?? 1]
+      [
+        trip_id,
+        location_name,
+        latitude ?? null,
+        longitude ?? null,
+        order_sequence ?? 1,
+        country ?? null,
+        parent_destination_id ?? null,
+        days ?? 1,
+        accommodation ?? null,
+        activities ?? null,
+        transportation ?? null,
+      ]
     );
 
     return res.status(201).json({ message: 'Destination added.', destination: result.rows[0] });
@@ -106,7 +152,18 @@ async function createDestination(req, res) {
 async function updateDestination(req, res) {
   try {
     const { id } = req.params;
-    const { location_name, latitude, longitude, order_sequence } = req.body;
+    const {
+      location_name,
+      latitude,
+      longitude,
+      order_sequence,
+      country,
+      parent_destination_id,
+      days,
+      accommodation,
+      activities,
+      transportation,
+    } = req.body;
 
     const existing = await pool.query('SELECT * FROM destinations WHERE id = $1', [id]);
     const destination = existing.rows[0];
@@ -120,10 +177,28 @@ async function updateDestination(req, res) {
        SET location_name = COALESCE($1, location_name),
            latitude = COALESCE($2, latitude),
            longitude = COALESCE($3, longitude),
-           order_sequence = COALESCE($4, order_sequence)
-       WHERE id = $5
+           order_sequence = COALESCE($4, order_sequence),
+           country = COALESCE($5, country),
+           parent_destination_id = COALESCE($6, parent_destination_id),
+           days = COALESCE($7, days),
+           accommodation = COALESCE($8, accommodation),
+           activities = COALESCE($9, activities),
+           transportation = COALESCE($10, transportation)
+       WHERE id = $11
        RETURNING *`,
-      [location_name, latitude, longitude, order_sequence, id]
+      [
+        location_name,
+        latitude,
+        longitude,
+        order_sequence,
+        country,
+        parent_destination_id,
+        days,
+        accommodation,
+        activities,
+        transportation,
+        id,
+      ]
     );
 
     return res.status(200).json({ message: 'Destination updated.', destination: result.rows[0] });
