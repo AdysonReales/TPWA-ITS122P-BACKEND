@@ -19,13 +19,10 @@ const feedbackRoutes = require('./routes/feedback.routes');
 const { initExpensesTable } = require('./controllers/expenses.controller');
 const { initAuthColumns } = require('./controllers/auth.controller');
 const { initDestinationsTable } = require('./controllers/destinations.controller');
-<<<<<<< HEAD
-const { initTripColumns } = require('./controllers/trips.controller');
-=======
 const { initCountryProfilesTable } = require('./controllers/countryProfiles.controller');
 const { initFeedbackTable } = require('./controllers/feedback.controller');
 const { initBookingsTable } = require('./controllers/bookings.controller');
->>>>>>> feature/country-profiles-schema-api
+const { initTripColumns } = require('./controllers/trips.controller');
 const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
@@ -73,10 +70,8 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-<<<<<<< HEAD
-=======
+
 // Generous payload size limit for JSON and URL-encoded data placed BEFORE routes to handle cover image uploads
->>>>>>> feature/country-profiles-schema-api
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ limit: '15mb', extended: true }));
 app.use(cookieParser());
@@ -118,11 +113,8 @@ app.listen(PORT, () => {
   initExpensesTable();
   initAuthColumns();
   initDestinationsTable();
-<<<<<<< HEAD
   initTripColumns();
-=======
   initCountryProfilesTable();
   initFeedbackTable();
   initBookingsTable();
->>>>>>> feature/country-profiles-schema-api
 });
