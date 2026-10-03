@@ -1,5 +1,6 @@
 const bcrypt = require('bcrypt');
 const pool = require('../config/db');
+const { logAction } = require('../utils/logger');
 
 const VALID_ROLES = ['admin', 'staff', 'customer', 'vendor'];
 
@@ -156,6 +157,25 @@ async function updateUser(req, res) {
       return res.status(404).json({ message: 'User not found.' });
     }
 
+    if (req.user) {
+      const actionType =
+        is_active !== undefined
+          ? is_active
+            ? 'ACTIVATE_USER'
+            : 'DEACTIVATE_USER'
+          : 'UPDATE_USER';
+      logAction({
+        userId: req.user.id,
+        actionType,
+        tableAffected: 'users',
+        recordId: id,
+        description:
+          is_active !== undefined
+            ? `${is_active ? 'Activated' : 'Deactivated'} account for ${updatedUser.full_name || updatedUser.email}`
+            : `Updated account for ${updatedUser.full_name || updatedUser.email}`,
+      });
+    }
+
     return res.status(200).json({ message: 'User updated successfully.', user: updatedUser });
   } catch (err) {
     console.error('Update user error:', err);
@@ -167,10 +187,23 @@ async function updateUser(req, res) {
 async function deleteUser(req, res) {
   try {
     const { id } = req.params;
+    const existing = await pool.query('SELECT full_name, email FROM users WHERE id = $1', [id]);
+    const existingUser = existing.rows[0];
+
     const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING id', [id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'User not found.' });
+    }
+
+    if (req.user) {
+      logAction({
+        userId: req.user.id,
+        actionType: 'FORCE_DELETE_USER',
+        tableAffected: 'users',
+        recordId: id,
+        description: `Permanently deleted user account #${id} (${existingUser ? existingUser.email : 'Unknown'})`,
+      });
     }
 
     return res.status(200).json({ message: 'User deleted.' });

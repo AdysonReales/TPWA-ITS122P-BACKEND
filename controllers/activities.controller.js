@@ -26,7 +26,14 @@ async function getActivities(req, res) {
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    const result = await pool.query(`SELECT * FROM activities ${where} ORDER BY start_time ASC`, values);
+    const result = await pool.query(
+      `SELECT a.*, d.location_name as destination, c.name as category 
+       FROM activities a
+       LEFT JOIN destinations d ON a.destination_id = d.id
+       LEFT JOIN categories c ON a.category_id = c.id
+       ${where} ORDER BY a.start_time ASC`,
+      values
+    );
 
     return res.status(200).json({ activities: result.rows });
   } catch (err) {
@@ -39,7 +46,14 @@ async function getActivities(req, res) {
 async function getActivityById(req, res) {
   try {
     const { id } = req.params;
-    const result = await pool.query('SELECT * FROM activities WHERE id = $1', [id]);
+    const result = await pool.query(
+      `SELECT a.*, d.location_name as destination, c.name as category 
+       FROM activities a
+       LEFT JOIN destinations d ON a.destination_id = d.id
+       LEFT JOIN categories c ON a.category_id = c.id
+       WHERE a.id = $1`,
+      [id]
+    );
     if (result.rows.length === 0) return res.status(404).json({ message: 'Activity not found.' });
     return res.status(200).json({ activity: result.rows[0] });
   } catch (err) {
@@ -52,12 +66,12 @@ async function getActivityById(req, res) {
 async function createActivity(req, res) {
   try {
     const { id: userId, role } = req.user;
-    const { destination_id, category_id, title, start_time, end_time, cost } = req.body;
+    let { destination_id, category_id, title, start_time, end_time, cost } = req.body;
     let { vendor_id } = req.body;
 
-    if (!destination_id || !category_id || !title || !start_time || !end_time) {
+    if (!title || !category_id) {
       return res.status(400).json({
-        message: 'destination_id, category_id, title, start_time, and end_time are required.',
+        message: 'Title and category_id are required.',
       });
     }
 
@@ -67,13 +81,37 @@ async function createActivity(req, res) {
         return res.status(400).json({ message: 'You need a vendor profile before creating activities.' });
       }
     } else if (!vendor_id) {
-      return res.status(400).json({ message: 'vendor_id is required for staff/admin-created activities.' });
+      const vpRes = await pool.query('SELECT id FROM vendor_profiles LIMIT 1');
+      if (vpRes.rows.length > 0) {
+        vendor_id = vpRes.rows[0].id;
+      }
     }
+
+    // Resolve destination_id if text destination is provided
+    if (!destination_id && req.body.destination) {
+      const destMatch = await pool.query(
+        'SELECT id FROM destinations WHERE location_name ILIKE $1 LIMIT 1',
+        [`%${req.body.destination.trim()}%`]
+      );
+      if (destMatch.rows.length > 0) {
+        destination_id = destMatch.rows[0].id;
+      }
+    }
+
+    if (!destination_id) {
+      const anyDest = await pool.query('SELECT id FROM destinations LIMIT 1');
+      if (anyDest.rows.length > 0) {
+        destination_id = anyDest.rows[0].id;
+      }
+    }
+
+    const resolvedStartTime = start_time || new Date().toISOString();
+    const resolvedEndTime = end_time || new Date(Date.now() + 2 * 3600000).toISOString();
 
     const result = await pool.query(
       `INSERT INTO activities (destination_id, category_id, vendor_id, title, start_time, end_time, cost)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [destination_id, category_id, vendor_id, title, start_time, end_time, cost || 0]
+      [destination_id, category_id, vendor_id, title.trim(), resolvedStartTime, resolvedEndTime, cost || 0]
     );
 
     return res.status(201).json({ message: 'Activity created.', activity: result.rows[0] });

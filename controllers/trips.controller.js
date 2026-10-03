@@ -163,7 +163,8 @@ async function deleteTrip(req, res) {
     }
 
     await pool.query('DELETE FROM trips WHERE id = $1', [id]);
-    logAction({ userId, actionType: 'DELETE_TRIP', tableAffected: 'trips', recordId: id, description: `Deleted trip #${id}` });
+    const deleteReason = req.body && req.body.reason ? `Force deleted trip #${id}: ${req.body.reason}` : `Deleted trip #${id}`;
+    logAction({ userId, actionType: 'DELETE_TRIP', tableAffected: 'trips', recordId: id, description: deleteReason });
 
     return res.status(200).json({ message: 'Trip deleted.' });
   } catch (err) {
