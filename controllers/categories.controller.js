@@ -1,9 +1,34 @@
 const pool = require('../config/db');
 
+async function initCategoriesTable() {
+  try {
+    await pool.query(`
+      DO $$ 
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'categories' AND column_name = 'id'
+        ) THEN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'categories' AND column_name = 'categoryid'
+          ) THEN
+            ALTER TABLE categories ADD COLUMN id INTEGER;
+            UPDATE categories SET id = categoryid WHERE id IS NULL;
+          END IF;
+        END IF;
+      END $$;
+    `);
+    console.log('Categories table verified.');
+  } catch (err) {
+    console.warn('Categories table extension notice:', err.message);
+  }
+}
+
 // GET /api/categories
 async function getCategories(req, res) {
   try {
-    const result = await pool.query('SELECT * FROM categories ORDER BY name ASC');
+    const result = await pool.query('SELECT *, COALESCE(id, categoryid) AS id FROM categories ORDER BY name ASC');
     return res.status(200).json({ categories: result.rows });
   } catch (err) {
     console.error('Get categories error:', err);
@@ -75,4 +100,4 @@ async function deleteCategory(req, res) {
   }
 }
 
-module.exports = { getCategories, createCategory, updateCategory, deleteCategory };
+module.exports = { getCategories, createCategory, updateCategory, deleteCategory, initCategoriesTable };

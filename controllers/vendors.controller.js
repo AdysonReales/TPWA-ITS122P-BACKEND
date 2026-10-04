@@ -1,5 +1,25 @@
 const pool = require('../config/db');
 
+async function initVendorTable() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vendor_profiles (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        business_name VARCHAR(150),
+        service_type VARCHAR(100),
+        description TEXT,
+        phone VARCHAR(50),
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      ALTER TABLE activities ADD COLUMN IF NOT EXISTS vendor_id INTEGER REFERENCES vendor_profiles(id) ON DELETE SET NULL;
+    `);
+    console.log('Vendor profiles table verified.');
+  } catch (err) {
+    console.warn('Vendor table initialization warning:', err.message);
+  }
+}
+
 // GET /api/vendors  (admin/staff see all, vendor sees only their own)
 async function getVendors(req, res) {
   try {
@@ -112,4 +132,4 @@ async function deleteVendor(req, res) {
   }
 }
 
-module.exports = { getVendors, getVendorById, createVendor, updateVendor, deleteVendor };
+module.exports = { getVendors, getVendorById, createVendor, updateVendor, deleteVendor, initVendorTable };

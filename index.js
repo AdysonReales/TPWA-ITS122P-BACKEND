@@ -1,4 +1,4 @@
-﻿require('dotenv').config();
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
@@ -23,6 +23,8 @@ const { initCountryProfilesTable } = require('./controllers/countryProfiles.cont
 const { initFeedbackTable } = require('./controllers/feedback.controller');
 const { initBookingsTable } = require('./controllers/bookings.controller');
 const { initTripColumns } = require('./controllers/trips.controller');
+const { initCategoriesTable } = require('./controllers/categories.controller');
+const { initVendorTable } = require('./controllers/vendors.controller');
 const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
@@ -116,5 +118,7 @@ app.listen(PORT, () => {
   initTripColumns();
   initCountryProfilesTable();
   initFeedbackTable();
+  initCategoriesTable();
+  initVendorTable();
   initBookingsTable();
 });

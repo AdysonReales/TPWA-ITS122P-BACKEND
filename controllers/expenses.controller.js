@@ -149,11 +149,15 @@ async function addExpense(req, res) {
       return res.status(403).json({ message: 'You do not have access to this trip.' });
     }
 
-    const currentBudget = parseFloat(trip.total_budget || 0);
-    // Budget Protection: Prevent expenses exceeding remaining balance
-    if (parsedCost > currentBudget) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ message: 'This expense exceeds your remaining trip budget.' });
+    let safeDestinationId = null;
+    if (destination_id) {
+      const parsedId = parseInt(destination_id, 10);
+      if (!isNaN(parsedId) && parsedId > 0) {
+        const destCheck = await client.query('SELECT id FROM destinations WHERE id = $1', [parsedId]);
+        if (destCheck.rows.length > 0) {
+          safeDestinationId = parsedId;
+        }
+      }
     }
 
     const expenseInsert = await client.query(
@@ -167,7 +171,7 @@ async function addExpense(req, res) {
         expenseCategory,
         parsedCost,
         expenseDate,
-        destination_id ? parseInt(destination_id, 10) : null,
+        safeDestinationId,
         country_name ? country_name.trim() : null,
       ]
     );

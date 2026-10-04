@@ -23,6 +23,9 @@ async function initBookingsTable() {
       ALTER TABLE bookings ADD COLUMN IF NOT EXISTS notes TEXT;
       ALTER TABLE bookings ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
 
+      ALTER TABLE bookings ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
+      UPDATE bookings SET submitted_at = COALESCE(booking_date, created_at, CURRENT_TIMESTAMP) WHERE submitted_at IS NULL;
+
       DO $$ 
       BEGIN
         IF EXISTS (
@@ -96,7 +99,7 @@ async function getBookings(req, res) {
       text += ` (b.trip_id = $${values.length} OR d.trip_id = $${values.length})`;
     }
 
-    text += ' ORDER BY b.submitted_at DESC, b.id DESC';
+    text += ' ORDER BY COALESCE(b.submitted_at, b.booking_date, b.created_at) DESC, b.id DESC';
 
     const result = await pool.query(text, values);
     return res.status(200).json({ bookings: result.rows.map(normalizeBookingRow) });
