@@ -77,6 +77,19 @@ async function updateUser(req, res) {
   try {
     const { id } = req.params;
     const { name, full_name, username, bio, avatar_url, password, role, is_active } = req.body;
+    const isAdmin = req.user?.role === 'admin';
+    if (!req.user || (String(req.user.id) !== String(id) && !isAdmin)) {
+      return res.status(403).json({ message: 'You do not have access to update this account.' });
+    }
+    if (!isAdmin && (role !== undefined || is_active !== undefined)) {
+      return res.status(403).json({ message: 'Only administrators can change account role or activation state.' });
+    }
+    if (role !== undefined && !VALID_ROLES.includes(role)) {
+      return res.status(400).json({ message: `role must be one of: ${VALID_ROLES.join(', ')}` });
+    }
+    if (is_active !== undefined && typeof is_active !== 'boolean') {
+      return res.status(400).json({ message: 'is_active must be a boolean.' });
+    }
 
     let passwordHash = null;
     let updatedPastPasswords = null;
