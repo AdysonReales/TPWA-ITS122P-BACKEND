@@ -115,8 +115,9 @@ async function addBalance(req, res) {
 
 // POST /api/trips/:tripId/budget/expenses
 async function addExpense(req, res) {
-  const client = await pool.connect();
+  let client;
   try {
+    client = await pool.connect();
     const { tripId } = req.params;
     const { id: userId, role } = req.user;
     const { name, items, category, cost, date, destination_id, country_name } = req.body;
@@ -151,8 +152,9 @@ async function addExpense(req, res) {
 
     let safeDestinationId = null;
     if (destination_id) {
-      const parsedId = parseInt(destination_id, 10);
-      if (!isNaN(parsedId) && parsedId > 0) {
+      const rawDestinationId = String(destination_id).trim();
+      const parsedId = /^\d+$/.test(rawDestinationId) ? Number(rawDestinationId) : NaN;
+      if (Number.isSafeInteger(parsedId) && parsedId > 0) {
         const destCheck = await client.query('SELECT id FROM destinations WHERE id = $1', [parsedId]);
         if (destCheck.rows.length > 0) {
           safeDestinationId = parsedId;
@@ -205,18 +207,23 @@ async function addExpense(req, res) {
       balance: newBalance,
     });
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch (rollbackError) {
+        console.error('Add expense rollback error:', rollbackError);
+      }
+    }
     console.error('Add expense error:', err);
     return res.status(500).json({ message: 'Server error.' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }
 
 // DELETE /api/trips/:tripId/budget/expenses/:expenseId
 async function deleteExpense(req, res) {
-  const client = await pool.connect();
+  let client;
   try {
+    client = await pool.connect();
     const { tripId, expenseId } = req.params;
     const { id: userId, role } = req.user;
 
@@ -273,11 +280,15 @@ async function deleteExpense(req, res) {
       balance: newBalance,
     });
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch (rollbackError) {
+        console.error('Delete expense rollback error:', rollbackError);
+      }
+    }
     console.error('Delete expense error:', err);
     return res.status(500).json({ message: 'Server error.' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }
 

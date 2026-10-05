@@ -1,34 +1,9 @@
 const pool = require('../config/db');
 
-async function initCategoriesTable() {
-  try {
-    await pool.query(`
-      DO $$ 
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_name = 'categories' AND column_name = 'id'
-        ) THEN
-          IF EXISTS (
-            SELECT 1 FROM information_schema.columns 
-            WHERE table_name = 'categories' AND column_name = 'categoryid'
-          ) THEN
-            ALTER TABLE categories ADD COLUMN id INTEGER;
-            UPDATE categories SET id = categoryid WHERE id IS NULL;
-          END IF;
-        END IF;
-      END $$;
-    `);
-    console.log('Categories table verified.');
-  } catch (err) {
-    console.warn('Categories table extension notice:', err.message);
-  }
-}
-
 // GET /api/categories
 async function getCategories(req, res) {
   try {
-    const result = await pool.query('SELECT *, COALESCE(id, categoryid) AS id FROM categories ORDER BY name ASC');
+    const result = await pool.query('SELECT categoryid, categoryid AS id, name, type FROM categories ORDER BY name ASC');
     return res.status(200).json({ categories: result.rows });
   } catch (err) {
     console.error('Get categories error:', err);
@@ -45,7 +20,7 @@ async function createCategory(req, res) {
     }
 
     const result = await pool.query(
-      'INSERT INTO categories (name, type) VALUES ($1, $2) RETURNING *',
+      'INSERT INTO categories (name, type) VALUES ($1, $2) RETURNING categoryid, categoryid AS id, name, type',
       [name, type]
     );
 
@@ -64,7 +39,7 @@ async function updateCategory(req, res) {
 
     const result = await pool.query(
       `UPDATE categories SET name = COALESCE($1, name), type = COALESCE($2, type)
-       WHERE id = $3 RETURNING *`,
+       WHERE categoryid = $3 RETURNING categoryid, categoryid AS id, name, type`,
       [name, type, id]
     );
 
@@ -83,7 +58,7 @@ async function updateCategory(req, res) {
 async function deleteCategory(req, res) {
   try {
     const { id } = req.params;
-    const result = await pool.query('DELETE FROM categories WHERE id = $1 RETURNING id', [id]);
+    const result = await pool.query('DELETE FROM categories WHERE categoryid = $1 RETURNING categoryid AS id', [id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Category not found.' });
@@ -100,4 +75,4 @@ async function deleteCategory(req, res) {
   }
 }
 
-module.exports = { getCategories, createCategory, updateCategory, deleteCategory, initCategoriesTable };
+module.exports = { getCategories, createCategory, updateCategory, deleteCategory };

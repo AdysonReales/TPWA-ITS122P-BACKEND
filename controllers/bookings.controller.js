@@ -24,7 +24,7 @@ async function initBookingsTable() {
       ALTER TABLE bookings ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
 
       ALTER TABLE bookings ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
-      UPDATE bookings SET submitted_at = COALESCE(booking_date, created_at, CURRENT_TIMESTAMP) WHERE submitted_at IS NULL;
+      UPDATE bookings SET submitted_at = COALESCE(booking_date, CURRENT_TIMESTAMP) WHERE submitted_at IS NULL;
 
       DO $$ 
       BEGIN
@@ -99,7 +99,7 @@ async function getBookings(req, res) {
       text += ` (b.trip_id = $${values.length} OR d.trip_id = $${values.length})`;
     }
 
-    text += ' ORDER BY COALESCE(b.submitted_at, b.booking_date, b.created_at) DESC, b.id DESC';
+    text += ' ORDER BY COALESCE(b.submitted_at, b.booking_date) DESC, b.id DESC';
 
     const result = await pool.query(text, values);
     return res.status(200).json({ bookings: result.rows.map(normalizeBookingRow) });
@@ -150,8 +150,8 @@ async function createBooking(req, res) {
         userId,
         activity_id || null,
         toDbStatus('pending'),
-        trip_id ? parseInt(trip_id, 10) : null,
-        destination_id ? parseInt(destination_id, 10) : null,
+        trip_id && /^\d+$/.test(String(trip_id).trim()) && Number.isSafeInteger(Number(trip_id)) ? Number(trip_id) : null,
+        destination_id && /^\d+$/.test(String(destination_id).trim()) && Number.isSafeInteger(Number(destination_id)) ? Number(destination_id) : null,
         custom_title ? custom_title.trim() : null,
         custom_type ? custom_type.trim() : (activity_id ? 'activity' : 'hotel'),
         custom_location ? custom_location.trim() : null,

@@ -30,7 +30,7 @@ async function getActivities(req, res) {
       `SELECT a.*, d.location_name as destination, c.name as category 
        FROM activities a
        LEFT JOIN destinations d ON a.destination_id = d.id
-       LEFT JOIN categories c ON a.category_id = c.id
+       LEFT JOIN categories c ON a.category_id = c.categoryid
        ${where} ORDER BY a.start_time ASC`,
       values
     );
@@ -50,7 +50,7 @@ async function getActivityById(req, res) {
       `SELECT a.*, d.location_name as destination, c.name as category 
        FROM activities a
        LEFT JOIN destinations d ON a.destination_id = d.id
-       LEFT JOIN categories c ON a.category_id = c.id
+       LEFT JOIN categories c ON a.category_id = c.categoryid
        WHERE a.id = $1`,
       [id]
     );
@@ -66,7 +66,8 @@ async function getActivityById(req, res) {
 async function createActivity(req, res) {
   try {
     const { id: userId, role } = req.user;
-    let { destination_id, category_id, title, start_time, end_time, cost } = req.body;
+    let { destination_id, title, start_time, end_time, cost } = req.body;
+    const category_id = req.body.category_id ?? req.body.categoryid;
     let { vendor_id } = req.body;
 
     if (!title || !category_id) {
@@ -87,7 +88,10 @@ async function createActivity(req, res) {
       }
     }
 
-    // Resolve destination_id if text destination is provided
+    // Resolve catalog destinations by integer ID or by the frontend's name field.
+    if (destination_id && !/^\d+$/.test(String(destination_id).trim())) {
+      destination_id = null;
+    }
     if (!destination_id && req.body.destination) {
       const destMatch = await pool.query(
         'SELECT id FROM destinations WHERE location_name ILIKE $1 LIMIT 1',
@@ -98,11 +102,14 @@ async function createActivity(req, res) {
       }
     }
 
-    if (!destination_id) {
+    if (!destination_id && !req.body.destination) {
       const anyDest = await pool.query('SELECT id FROM destinations LIMIT 1');
       if (anyDest.rows.length > 0) {
         destination_id = anyDest.rows[0].id;
       }
+    }
+    if (!destination_id) {
+      return res.status(400).json({ message: 'A valid destination_id or matching destination name is required.' });
     }
 
     const resolvedStartTime = start_time || new Date().toISOString();
@@ -126,7 +133,8 @@ async function updateActivity(req, res) {
   try {
     const { id } = req.params;
     const { id: userId, role } = req.user;
-    const { title, start_time, end_time, cost, category_id } = req.body;
+    const { title, start_time, end_time, cost } = req.body;
+    const category_id = req.body.category_id ?? req.body.categoryid;
 
     const existing = await pool.query('SELECT * FROM activities WHERE id = $1', [id]);
     const activity = existing.rows[0];
