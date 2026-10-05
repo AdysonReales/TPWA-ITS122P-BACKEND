@@ -11,11 +11,11 @@ const {
   resendVerification,
   cancelRegistration,
 } = require('../controllers/auth.controller');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, optionalAuthenticateToken } = require('../middleware/auth');
 
 router.post('/register', register);
 router.post('/login', login);
-router.post('/logout', logout);
+router.post('/logout', optionalAuthenticateToken, logout);
 router.get('/me', authenticateToken, getCurrentUser);
 
 // Email verification routes

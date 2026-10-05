@@ -26,4 +26,21 @@ function authenticateToken(req, res, next) {
   }
 }
 
-module.exports = { authenticateToken };
+// Populates req.user only when a valid token is present. This is useful for
+// endpoints such as logout that should remain idempotent for expired sessions.
+function optionalAuthenticateToken(req, res, next) {
+  const bearer = req.headers.authorization?.startsWith('Bearer ')
+    ? req.headers.authorization.split(' ')[1]
+    : null;
+  const token = req.cookies?.token || bearer;
+  if (!token) return next();
+
+  try {
+    req.user = jwt.verify(token, process.env.JWT_SECRET);
+  } catch (_error) {
+    // Optional authentication deliberately treats invalid/expired tokens as anonymous.
+  }
+  return next();
+}
+
+module.exports = { authenticateToken, optionalAuthenticateToken };

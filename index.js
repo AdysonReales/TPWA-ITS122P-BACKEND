@@ -16,6 +16,8 @@ const logRoutes = require('./routes/logs.routes');
 const expenseRoutes = require('./routes/expenses.routes');
 const countryProfilesRoutes = require('./routes/countryProfiles.routes');
 const feedbackRoutes = require('./routes/feedback.routes');
+const activityLogRoutes = require('./routes/activity.routes');
+const sessionsRoutes = require('./routes/sessions.routes');
 const { initExpensesTable } = require('./controllers/expenses.controller');
 const { initAuthColumns } = require('./controllers/auth.controller');
 const { initDestinationsTable } = require('./controllers/destinations.controller');
@@ -23,7 +25,6 @@ const { initCountryProfilesTable } = require('./controllers/countryProfiles.cont
 const { initFeedbackTable } = require('./controllers/feedback.controller');
 const { initBookingsTable } = require('./controllers/bookings.controller');
 const { initTripColumns } = require('./controllers/trips.controller');
-const { initCategoriesTable } = require('./controllers/categories.controller');
 const { initVendorTable } = require('./controllers/vendors.controller');
 const adminRoutes = require('./routes/admin.routes');
 
@@ -101,6 +102,8 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/logs', logRoutes);
 app.use('/api/country-profiles', countryProfilesRoutes);
 app.use('/api/feedback', feedbackRoutes);
+app.use('/api/activity', activityLogRoutes);
+app.use('/api/sessions', sessionsRoutes);
 app.use('/api/admin', adminRoutes);
 
 // 404 handler
@@ -118,7 +121,6 @@ app.listen(PORT, () => {
   initTripColumns();
   initCountryProfilesTable();
   initFeedbackTable();
-  initCategoriesTable();
   initVendorTable();
   initBookingsTable();
 });

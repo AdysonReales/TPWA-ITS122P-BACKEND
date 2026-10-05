@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
 const crypto = require('crypto');
 const SibApiV3Sdk = require('@getbrevo/brevo');
+const { recordActivitySafely } = require('../utils/activityLogger');
 
 const SALT_ROUNDS = 10;
 const TOKEN_EXPIRY = '1d';
@@ -194,6 +195,8 @@ async function register(req, res) {
     const token = signToken(user);
     setAuthCookie(res, token);
 
+    await recordActivitySafely({ req, userId: user.id, eventType: 'auth.register' });
+
     return res.status(201).json({
       message: 'Registration successful.',
       user,
@@ -215,7 +218,14 @@ async function login(req, res) {
     }
 
     const cleanEmail = email.toLowerCase().trim();
-    const result = await pool.query('SELECT * FROM users WHERE LOWER(email) = $1', [cleanEmail]);
+    // Select only the authentication fields required for login. In particular,
+    // do not load password-reset tokens, verification OTPs, or password history.
+    const result = await pool.query(
+      `SELECT id, full_name, email, password_hash, role, username, is_active, is_verified
+       FROM users
+       WHERE LOWER(email) = $1`,
+      [cleanEmail]
+    );
     const user = result.rows[0];
 
     if (!user) {
@@ -242,6 +252,8 @@ async function login(req, res) {
     const token = signToken(user);
     setAuthCookie(res, token);
 
+    await recordActivitySafely({ req, userId: user.id, eventType: 'auth.login' });
+
     return res.status(200).json({
       message: 'Login successful.',
       user: {
@@ -260,12 +272,15 @@ async function login(req, res) {
 }
 
 // POST /api/auth/logout
-function logout(req, res) {
+async function logout(req, res) {
   res.clearCookie('token', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
   });
+  if (req.user?.id) {
+    await recordActivitySafely({ req, userId: req.user.id, eventType: 'auth.logout' });
+  }
   return res.status(200).json({ message: 'Logged out successfully.' });
 }
 
