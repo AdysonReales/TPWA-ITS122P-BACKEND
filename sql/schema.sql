@@ -419,6 +419,8 @@ CREATE INDEX IF NOT EXISTS idx_feedback_user_id ON feedback(user_id);
 
 -- Additional normalized extensions for destinations, expenses, and bookings
 ALTER TABLE destinations ADD COLUMN IF NOT EXISTS country VARCHAR(150);
+ALTER TABLE destinations ADD COLUMN IF NOT EXISTS country_code VARCHAR(2);
+ALTER TABLE destinations ADD COLUMN IF NOT EXISTS region VARCHAR(150);
 ALTER TABLE destinations ADD COLUMN IF NOT EXISTS parent_destination_id INTEGER REFERENCES destinations(id) ON DELETE CASCADE;
 ALTER TABLE destinations ADD COLUMN IF NOT EXISTS days INTEGER DEFAULT 1;
 ALTER TABLE destinations ADD COLUMN IF NOT EXISTS accommodation TEXT;
@@ -438,5 +440,37 @@ ALTER TABLE bookings ADD COLUMN IF NOT EXISTS booking_date TIMESTAMPTZ;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cost DECIMAL(10, 2);
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS notes TEXT;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+
+-- Reusable accommodation inventory is keyed by country and area, independent of trips.
+CREATE TABLE IF NOT EXISTS accommodations (
+    id SERIAL PRIMARY KEY,
+    country VARCHAR(150) NOT NULL,
+    area VARCHAR(150) NOT NULL,
+    name VARCHAR(180) NOT NULL,
+    address TEXT,
+    price DECIMAL(10, 2),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_demo BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_accommodations_location_active ON accommodations(country, area, is_active);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS accommodation_id INTEGER REFERENCES accommodations(id) ON DELETE RESTRICT;
+ALTER TABLE destinations ADD COLUMN IF NOT EXISTS accommodation_id INTEGER;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'destinations_accommodation_id_fkey'
+          AND conrelid = 'destinations'::regclass
+    ) THEN
+        ALTER TABLE destinations
+            ADD CONSTRAINT destinations_accommodation_id_fkey
+            FOREIGN KEY (accommodation_id)
+            REFERENCES accommodations(id)
+            ON DELETE SET NULL;
+    END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_destinations_accommodation_id ON destinations(accommodation_id);
 
 

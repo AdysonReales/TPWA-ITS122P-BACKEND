@@ -5,9 +5,11 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "seed:accommodations": "node scripts/seed-accommodations.js"
   },
   "dependencies": {
+    "@countrystatecity/countries": "^1.0.9",
     "@getbrevo/brevo": "^2.2.0",
     "bcrypt": "^5.1.1",
     "cookie-parser": "^1.4.6",

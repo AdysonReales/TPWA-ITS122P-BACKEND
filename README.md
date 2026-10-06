@@ -121,12 +121,34 @@ Server runs at `http://localhost:5000` by default. Health check: `GET /api/healt
 | PUT    | `/api/activities/:id` | Admin, Staff, Vendor (own) | Update an activity              |
 | DELETE | `/api/activities/:id` | Admin, Staff, Vendor (own) | Delete an activity              |
 | GET    | `/api/bookings?status=` | Admin, Staff, Customer, Vendor | List relevant bookings (customer: own, vendor: theirs, staff/admin: all) |
-| POST   | `/api/bookings`      | Customer              | Submit a booking request (starts as `pending`) |
-| PUT    | `/api/bookings/:id`  | Admin, Staff          | Confirm, reject, or complete a booking |
+| POST   | `/api/bookings`      | Customer              | Submit an accommodation request (starts as `pending`) |
+| PUT    | `/api/bookings/:id`  | Admin, Staff          | Change a pending booking to `confirmed` or `cancelled` |
+| GET    | `/api/accommodations?country=&area=` | Admin, Staff, Customer | List active accommodations for one country and area |
+| GET    | `/api/accommodations/:id` | Admin, Staff, Customer | Get one active accommodation |
 | GET    | `/api/notifications` | Authenticated         | Get the logged-in user's notifications |
 | PUT    | `/api/notifications/:id/read` | Authenticated | Mark one notification as read       |
 | PUT    | `/api/notifications/read-all` | Authenticated | Mark all notifications as read      |
 | GET    | `/api/logs?user_id=` | Admin only            | View the system audit trail          |
+
+### Accommodation booking contract
+
+`GET /api/accommodations?country=<country>&area=<area>` returns `{ accommodations: [...] }` with `id`, `country`, `area`, `name`, `address`, and `price`. Inactive records are excluded. Country and area are required, and matching is case/whitespace normalized. South Korea aliases (`Korea`, `Republic of Korea`, `KR`) resolve to `South Korea`.
+
+Customers submit `POST /api/bookings` with `trip_id`, itinerary-scoped `destination_id`, `accommodation_id`, and optional `booking_date` and `notes`. The API checks that the trip belongs to the customer and that the accommodation country/area matches the trip destination. It takes `cost` from `accommodations.price` and sets `status` to `pending`; supplied status or cost fields are ignored. A missing catalog price returns `422` with code `ACCOMMODATION_PRICE_DATA_REQUIRED`.
+
+Destinations may persist the planned property's `accommodation_id` while retaining the legacy `accommodation` display text. Create/update requests validate that the selected property is active and matches the canonical destination country and area; the property name is stored as the legacy text. Send `accommodation_id: null` to clear both fields. Changing destination location clears a linked property when it no longer matches. Existing destinations with text only remain valid. Apply `sql/migrations/20261007_destination_accommodation_link.up.sql` to add the nullable FK (`ON DELETE SET NULL`). Bookings against destinations without a linked ID retain the legacy flow; where a destination has a linked ID, booking requests must use that same property.
+
+Staff/Admin use `PUT /api/bookings/:id` with `{ "status": "confirmed" }` after making the external booking, or `{ "status": "cancelled", "rejection_reason": "..." }` to reject. Only `pending` may transition to `confirmed` or `cancelled`. Status changes write a `BOOKING_STATUS_CHANGED` row to `system_logs` and notify the booking owner.
+
+### Destination location resolution
+
+`POST /api/destinations` accepts `trip_id`, `country`, `location_name`, and optionally `region_hint`; it does not require or persist Mapbox IDs, raw properties, or submitted coordinates. `PUT /api/destinations/:id` resolves location changes the same way. The backend resolves exact country/city/region matches against the locally installed `@countrystatecity/countries` snapshot, then persists the dataset's canonical country, ISO-2 country code, area, region, latitude, and longitude. Ambiguous names return HTTP 409 with code `LOCATION_AMBIGUOUS` and candidates. Missing dataset coordinates are left null and returned with warning `OPEN LOCATION COORDINATES MISSING`.
+
+The package bundles Country State City data: 250 countries, 5,299 states/regions, and over 153,000 cities, with city and administrative coordinates where available. Data is licensed ODbL-1.0 and requires attribution; source: [dr5hn Countries States Cities Database](https://github.com/dr5hn/countries-states-cities-database). Data and database adaptations remain open under ODbL terms.
+
+### Demo accommodation inventory
+
+Run `npm run seed:accommodations -- --dry-run` to resolve and preview the explicitly configured demo locations. The seed uses the shared deterministic property and price generator; it does not expand country cards into capital-city inventory. The authenticated `GET /api/accommodations?country=<country>&area=<area>` endpoint resolves the selected location and creates three demo properties only when that canonical area has no active accommodations. Unsupported and ambiguous places are not generated. The seed script never runs on server startup. A real seed requires `--execute --confirm-target=<exact-host>/<database>` after independently confirming the configured target. Records are marked `is_demo=true`. Demo accommodation prices are project seed values and are not live hotel rates.
 
 ### Example: Register
 

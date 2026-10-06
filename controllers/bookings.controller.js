@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const { logAction } = require('../utils/logger');
+const { normalizeCountry, normalizeArea, getDestinationLocation } = require('../utils/accommodationLocation');
 
 // Normalizing helpers between Postgres Title-Case enum ('Pending', 'Confirmed'...)
 // and public API lowercase contract ('pending', 'confirmed'...)
@@ -64,10 +65,12 @@ async function getBookings(req, res) {
              COALESCE(b.cost, a.cost) AS resolved_cost,
              COALESCE(b.custom_type, 'activity') AS resolved_type,
              COALESCE(b.custom_location, d.location_name) AS resolved_location,
+             h.name AS accommodation_name, h.area AS accommodation_area,
              t.title AS trip_title
       FROM bookings b 
       LEFT JOIN users u ON u.id = b.user_id 
       LEFT JOIN activities a ON a.id = b.activity_id 
+      LEFT JOIN accommodations h ON h.id = b.accommodation_id
       LEFT JOIN destinations d ON d.id = COALESCE(b.destination_id, a.destination_id)
       LEFT JOIN trips t ON t.id = COALESCE(b.trip_id, d.trip_id)
     `;
@@ -110,59 +113,84 @@ async function getBookings(req, res) {
 }
 
 // POST /api/bookings  (customer submits a request; status starts as Pending)
-// Supports both catalog activity bookings and custom manual bookings (hotel, activity)
 async function createBooking(req, res) {
   try {
     const { id: userId } = req.user;
     const {
-      activity_id,
       trip_id,
       destination_id,
-      custom_title,
-      custom_type,
-      custom_location,
+      accommodation_id,
       booking_date,
-      cost,
       notes,
     } = req.body;
 
-    if (!activity_id && (!custom_title || !custom_title.trim())) {
-      return res.status(400).json({
-        message: 'Either activity_id or custom_title is required to create a booking.',
+    if (!accommodation_id || !destination_id || !trip_id) return res.status(400).json({ message: 'trip_id, destination_id, and accommodation_id are required.' });
+    const destinationId = Number(destination_id);
+    const accommodationId = Number(accommodation_id);
+    const tripId = Number(trip_id);
+    if (!Number.isSafeInteger(destinationId) || !Number.isSafeInteger(accommodationId) || !Number.isSafeInteger(tripId)) {
+      return res.status(400).json({ message: 'destination_id, accommodation_id, and trip_id must be integers.' });
+    }
+    const accommodationResult = await pool.query(
+      `SELECT a.id, a.country AS accommodation_country, a.area AS accommodation_area,
+              a.name, a.price, d.country AS destination_country,
+              d.location_name, d.accommodation_id AS destination_accommodation_id,
+              d.trip_id, t.user_id AS trip_owner_id
+       FROM accommodations a
+       JOIN destinations d ON d.id = $2
+       JOIN trips t ON t.id = d.trip_id
+       WHERE a.id = $1 AND d.trip_id = $3 AND t.user_id = $4 AND a.is_active = TRUE`,
+      [accommodationId, destinationId, tripId, userId]
+    );
+    if (!accommodationResult.rows[0]) return res.status(400).json({ message: 'Destination does not belong to this trip, or accommodation is unavailable.' });
+    const accommodation = accommodationResult.rows[0];
+    if (
+      accommodation.destination_accommodation_id !== null &&
+      accommodation.destination_accommodation_id !== undefined &&
+      Number(accommodation.destination_accommodation_id) !== accommodationId
+    ) {
+      return res.status(422).json({
+        code: 'DESTINATION_ACCOMMODATION_MISMATCH',
+        message: 'Selected accommodation does not match the property planned for this destination.',
       });
     }
-
-    if (activity_id) {
-      const activityCheck = await pool.query('SELECT id, cost FROM activities WHERE id = $1', [activity_id]);
-      if (activityCheck.rows.length === 0) {
-        return res.status(404).json({ message: 'Activity not found.' });
-      }
+    const destinationLocation = getDestinationLocation({ country: accommodation.destination_country, location_name: accommodation.location_name });
+    if (!destinationLocation.country || !destinationLocation.area) {
+      return res.status(422).json({ message: 'Trip destination must include a country and area before booking.' });
+    }
+    if (normalizeCountry(accommodation.accommodation_country) !== destinationLocation.country || normalizeArea(accommodation.accommodation_area) !== normalizeArea(destinationLocation.area)) {
+      return res.status(400).json({ message: 'Selected accommodation country and area do not match the trip destination.' });
+    }
+    if (accommodation.price === null || accommodation.price === undefined) {
+      return res.status(422).json({
+        code: 'ACCOMMODATION_PRICE_DATA_REQUIRED',
+        message: 'ACCOMMODATION PRICE DATA REQUIRED',
+        accommodations: [{ id: accommodation.id, country: accommodation.accommodation_country, area: accommodation.accommodation_area, name: accommodation.name }],
+      });
     }
 
     const result = await pool.query(
       `INSERT INTO bookings (
-        user_id, activity_id, status, trip_id, destination_id,
-        custom_title, custom_type, custom_location, booking_date, cost, notes
+        user_id, status, trip_id, destination_id, accommodation_id,
+        custom_title, custom_type, booking_date, cost, notes
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       VALUES ($1, $2, $3, $4, $5, $6, 'accommodation', $7, $8, $9)
        RETURNING *`,
       [
         userId,
-        activity_id || null,
         toDbStatus('pending'),
-        trip_id && /^\d+$/.test(String(trip_id).trim()) && Number.isSafeInteger(Number(trip_id)) ? Number(trip_id) : null,
-        destination_id && /^\d+$/.test(String(destination_id).trim()) && Number.isSafeInteger(Number(destination_id)) ? Number(destination_id) : null,
-        custom_title ? custom_title.trim() : null,
-        custom_type ? custom_type.trim() : (activity_id ? 'activity' : 'hotel'),
-        custom_location ? custom_location.trim() : null,
+        tripId,
+        destinationId,
+        accommodationId,
+        accommodation.name,
         booking_date || null,
-        cost !== undefined && cost !== null && cost !== '' ? parseFloat(cost) : null,
+        accommodation.price,
         notes ? notes.trim() : null,
       ]
     );
 
     const booking = normalizeBookingRow(result.rows[0]);
-    const bookingTitle = custom_title || `Activity #${activity_id}`;
+    const bookingTitle = accommodation.name;
     logAction({
       userId,
       actionType: 'CREATE_BOOKING',
@@ -189,7 +217,7 @@ async function updateBookingStatus(req, res) {
   try {
     const { id } = req.params;
     const { id: userId } = req.user;
-    const { status, rejection_reason, cost } = req.body;
+    const { status, rejection_reason } = req.body;
 
     if (status && !VALID_STATUSES.includes(status)) {
       return res.status(400).json({ message: `status must be one of: ${VALID_STATUSES.join(', ')}` });
@@ -202,24 +230,28 @@ async function updateBookingStatus(req, res) {
 
     const currentBooking = existing.rows[0];
     const newStatus = status ? toDbStatus(status) : currentBooking.status;
-    const newCost = cost !== undefined && cost !== null && cost !== '' ? parseFloat(cost) : currentBooking.cost;
+    if (String(currentBooking.status).toLowerCase() !== 'pending' || !['confirmed', 'cancelled'].includes(String(newStatus).toLowerCase())) {
+      return res.status(409).json({ message: 'Only Pending bookings can be changed to Confirmed or Cancelled.' });
+    }
+    const newCost = currentBooking.cost;
     const newReason = rejection_reason !== undefined ? rejection_reason : currentBooking.rejection_reason;
 
     const result = await pool.query(
       `UPDATE bookings 
        SET status = $1, cost = $2, rejection_reason = $3
-       WHERE id = $4
+       WHERE id = $4 AND status = $5
        RETURNING *`,
-      [newStatus, newCost, newReason, id]
+      [newStatus, newCost, newReason, id, currentBooking.status]
     );
+    if (!result.rows[0]) return res.status(409).json({ message: 'Booking status changed before this update. Refresh and try again.' });
     const booking = normalizeBookingRow(result.rows[0]);
 
     logAction({
       userId,
-      actionType: 'UPDATE_BOOKING',
+      actionType: 'BOOKING_STATUS_CHANGED',
       tableAffected: 'bookings',
       recordId: id,
-      description: `Booking #${id} updated: status=${booking.status}, cost=${newCost}`,
+      description: `booking.status_changed previous=${String(currentBooking.status).toLowerCase()} new=${booking.status}`,
     });
 
     const notifMessage =
