@@ -32,6 +32,10 @@ const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
 
+// Render terminates TLS through one trusted proxy; Express then resolves req.ip
+// from the forwarded client address instead of recording the proxy address.
+app.set('trust proxy', 1);
+
 // Allowed origins for CORS (supports localhost, production Vercel, and Vercel preview deployments)
 const allowedOrigins = [
   'http://localhost:5173',

@@ -1,17 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const {
-  startSession,
-  heartbeatSession,
-  endSession,
   getSessions,
+  getSessionActions,
+  getSessionMetrics,
 } = require('../controllers/sessions.controller');
 const { authenticateToken } = require('../middleware/auth');
 const { authorizeRoles } = require('../middleware/rbac');
 
-router.post('/start', authenticateToken, startSession);
-router.post('/heartbeat', authenticateToken, heartbeatSession);
-router.post('/end', authenticateToken, endSession);
 router.get('/', authenticateToken, authorizeRoles('admin'), getSessions);
+router.get('/metrics', authenticateToken, authorizeRoles('admin'), getSessionMetrics);
+router.get('/:id/actions', authenticateToken, authorizeRoles('admin'), getSessionActions);
 
 module.exports = router;

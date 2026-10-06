@@ -1,6 +1,7 @@
 const pool = require('../config/db');
 const { logAction } = require('../utils/logger');
 const { normalizeCountry, normalizeArea, getDestinationLocation } = require('../utils/accommodationLocation');
+const { recordActivitySafely } = require('../utils/activityLogger');
 
 // Normalizing helpers between Postgres Title-Case enum ('Pending', 'Confirmed'...)
 // and public API lowercase contract ('pending', 'confirmed'...)
@@ -190,13 +191,12 @@ async function createBooking(req, res) {
     );
 
     const booking = normalizeBookingRow(result.rows[0]);
-    const bookingTitle = accommodation.name;
-    logAction({
-      userId,
-      actionType: 'CREATE_BOOKING',
-      tableAffected: 'bookings',
-      recordId: booking.id,
-      description: `Submitted booking for "${bookingTitle}"`,
+    await recordActivitySafely({
+      req,
+      action: 'CREATE_BOOKING',
+      entityType: 'booking',
+      entityId: booking.id,
+      details: { tripId, destinationId, status: booking.status },
     });
 
     await pool.query(
@@ -246,6 +246,15 @@ async function updateBookingStatus(req, res) {
     if (!result.rows[0]) return res.status(409).json({ message: 'Booking status changed before this update. Refresh and try again.' });
     const booking = normalizeBookingRow(result.rows[0]);
 
+    const activityAction = booking.status === 'confirmed' ? 'STAFF_CONFIRM_BOOKING' : 'STAFF_CANCEL_BOOKING';
+    await recordActivitySafely({
+      req,
+      action: activityAction,
+      entityType: 'booking',
+      entityId: booking.id,
+      details: { status: booking.status },
+    });
+
     logAction({
       userId,
       actionType: 'BOOKING_STATUS_CHANGED',
@@ -274,5 +283,45 @@ async function updateBookingStatus(req, res) {
   }
 }
 
-module.exports = { initBookingsTable, getBookings, createBooking, updateBookingStatus };
+async function cancelBooking(req, res) {
+  try {
+    const bookingId = Number(req.params.id);
+    if (!Number.isSafeInteger(bookingId) || bookingId <= 0) {
+      return res.status(400).json({ message: 'Booking ID must be a positive integer.' });
+    }
+
+    const existing = await pool.query(
+      'SELECT id, user_id, status FROM bookings WHERE id = $1 AND user_id = $2',
+      [bookingId, req.user.id]
+    );
+    const booking = existing.rows[0];
+    if (!booking) return res.status(404).json({ message: 'Booking not found.' });
+    if (String(booking.status).toLowerCase() !== 'pending') {
+      return res.status(409).json({ message: 'Only pending bookings can be cancelled.' });
+    }
+
+    const result = await pool.query(
+      `UPDATE bookings
+       SET status = $1
+       WHERE id = $2 AND user_id = $3 AND status = $4
+       RETURNING id, user_id, status`,
+      [toDbStatus('cancelled'), bookingId, req.user.id, booking.status]
+    );
+    if (!result.rows[0]) return res.status(409).json({ message: 'Booking status changed before cancellation. Refresh and try again.' });
+
+    await recordActivitySafely({
+      req,
+      action: 'CANCEL_BOOKING',
+      entityType: 'booking',
+      entityId: bookingId,
+      details: { status: 'cancelled' },
+    });
+    return res.status(200).json({ message: 'Booking cancelled.', booking: normalizeBookingRow(result.rows[0]) });
+  } catch (error) {
+    console.error('Cancel booking error:', error);
+    return res.status(500).json({ message: 'Server error.' });
+  }
+}
+
+module.exports = { initBookingsTable, getBookings, createBooking, updateBookingStatus, cancelBooking };
 

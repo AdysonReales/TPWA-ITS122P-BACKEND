@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
 const crypto = require('crypto');
 const SibApiV3Sdk = require('@getbrevo/brevo');
-const { recordActivitySafely } = require('../utils/activityLogger');
+const { startUserSession, endUserSession } = require('../utils/userSessions');
 
 const SALT_ROUNDS = 10;
 const TOKEN_EXPIRY = '1d';
@@ -108,9 +108,9 @@ const sendVerificationEmail = async (toEmail, otp) => {
   return apiInstance.sendTransacEmail(email);
 };
 
-function signToken(user) {
+function signToken(user, sessionId = null) {
   return jwt.sign(
-    { id: user.id, email: user.email, role: user.role, username: user.username },
+    { id: user.id, email: user.email, role: user.role, username: user.username, session_id: sessionId },
     process.env.JWT_SECRET,
     { expiresIn: TOKEN_EXPIRY }
   );
@@ -195,8 +195,6 @@ async function register(req, res) {
     const token = signToken(user);
     setAuthCookie(res, token);
 
-    await recordActivitySafely({ req, userId: user.id, eventType: 'auth.register' });
-
     return res.status(201).json({
       message: 'Registration successful.',
       user,
@@ -249,10 +247,16 @@ async function login(req, res) {
       });
     }
 
-    const token = signToken(user);
-    setAuthCookie(res, token);
+    let session = null;
+    try {
+      session = await startUserSession(req, user.id);
+    } catch (sessionError) {
+      // Keep the existing login contract available if telemetry storage has a transient issue.
+      console.error('Login succeeded but session tracking failed:', sessionError.message);
+    }
 
-    await recordActivitySafely({ req, userId: user.id, eventType: 'auth.login' });
+    const token = signToken(user, session?.id ?? null);
+    setAuthCookie(res, token);
 
     return res.status(200).json({
       message: 'Login successful.',
@@ -264,6 +268,7 @@ async function login(req, res) {
         is_verified: user.is_verified,
       },
       token,
+      session_id: session?.id ?? null,
     });
   } catch (err) {
     console.error('Login error:', err);
@@ -273,14 +278,19 @@ async function login(req, res) {
 
 // POST /api/auth/logout
 async function logout(req, res) {
+  if (req.user?.id && req.user?.session_id) {
+    try {
+      await endUserSession(req.user.session_id, req.user.id);
+    } catch (sessionError) {
+      // Logout remains successful even when the session record cannot be finalized.
+      console.error('Unable to end user session during logout:', sessionError.message);
+    }
+  }
   res.clearCookie('token', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
   });
-  if (req.user?.id) {
-    await recordActivitySafely({ req, userId: req.user.id, eventType: 'auth.logout' });
-  }
   return res.status(200).json({ message: 'Logged out successfully.' });
 }
 

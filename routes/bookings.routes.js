@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getBookings, createBooking, updateBookingStatus } = require('../controllers/bookings.controller');
+const { getBookings, createBooking, updateBookingStatus, cancelBooking } = require('../controllers/bookings.controller');
 const { authenticateToken } = require('../middleware/auth');
 const { authorizeRoles } = require('../middleware/rbac');
 
@@ -8,6 +8,7 @@ const { authorizeRoles } = require('../middleware/rbac');
 // only staff/admin confirm or reject.
 router.get('/', authenticateToken, authorizeRoles('admin', 'staff', 'customer', 'vendor'), getBookings);
 router.post('/', authenticateToken, authorizeRoles('customer'), createBooking);
+router.patch('/:id/cancel', authenticateToken, authorizeRoles('customer'), cancelBooking);
 router.put('/:id', authenticateToken, authorizeRoles('admin', 'staff'), updateBookingStatus);
 
 module.exports = router;

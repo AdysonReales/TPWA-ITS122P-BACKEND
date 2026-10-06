@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const { getRequestContext } = require('./requestContext');
+const { ACTIVITY_ACTION_SET } = require('./activityEvents');
 
 const MAX_METADATA_BYTES = 8 * 1024;
 const MAX_METADATA_DEPTH = 5;
@@ -90,25 +91,42 @@ function validateAndSanitizeMetadata(metadata) {
   return sanitized;
 }
 
-async function insertActivity({ req, userId, sessionId = null, eventType, page = null, metadata = {} }) {
+async function insertActivity({
+  req,
+  userId,
+  sessionId = req?.user?.session_id ?? null,
+  action,
+  entityType = null,
+  entityId = null,
+  details = {},
+  page = null,
+  metadata,
+}) {
   const context = getRequestContext(req);
   const effectiveUserId = userId || context.userId;
-  const safeMetadata = validateAndSanitizeMetadata(metadata);
+  const safeDetails = validateAndSanitizeMetadata(details ?? metadata);
+  const safeEntityId = entityId === null || entityId === undefined ? null : Number(entityId);
+  if (!ACTIVITY_ACTION_SET.has(action) || !Number.isSafeInteger(safeEntityId) && safeEntityId !== null) {
+    throw new TypeError('A supported action and integer entity ID are required.');
+  }
 
   const result = await pool.query(
     `INSERT INTO activity_logs (
-       user_id, session_id, event_type, page, ip_address, user_agent, metadata
-     ) VALUES ($1, $2, $3, $4, $5::inet, $6, $7::jsonb)
-     RETURNING id, user_id, session_id, event_type, page, ip_address::text,
-               user_agent, metadata, created_at`,
+       user_id, session_id, action, entity_type, entity_id, details,
+       event_type, page, ip_address, user_agent, metadata
+     ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $3, $7, $8::inet, $9, $6::jsonb)
+     RETURNING id, user_id, session_id, action, entity_type, entity_id,
+               details, created_at`,
     [
       effectiveUserId,
       sessionId,
-      eventType,
-      page || context.requestPath,
+      action,
+      entityType,
+      safeEntityId,
+      JSON.stringify(safeDetails),
+      page,
       context.ipAddress,
       context.userAgent,
-      JSON.stringify(safeMetadata),
     ]
   );
   return result.rows[0];
@@ -119,7 +137,7 @@ async function recordActivitySafely(details) {
     await insertActivity(details);
     return true;
   } catch (error) {
-    console.warn(`Activity telemetry was not recorded (${details.eventType}):`, error.message);
+    console.warn(`Activity telemetry was not recorded (${details.action}):`, error.message);
     return false;
   }
 }

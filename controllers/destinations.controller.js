@@ -1,6 +1,7 @@
 const pool = require('../config/db');
 const { resolveLocation } = require('../utils/locationResolver');
 const { normalizeCountry, normalizeArea } = require('../utils/accommodationLocation');
+const { recordActivitySafely } = require('../utils/activityLogger');
 
 async function validateAccommodationForLocation(accommodationId, location) {
   const id = Number(accommodationId);
@@ -203,6 +204,23 @@ async function createDestination(req, res) {
       ]
     );
 
+    await recordActivitySafely({
+      req,
+      action: 'ADD_DESTINATION',
+      entityType: 'destination',
+      entityId: result.rows[0].id,
+      details: { tripId: result.rows[0].trip_id },
+    });
+    if (destinationAccommodationId !== null) {
+      await recordActivitySafely({
+        req,
+        action: 'SELECT_ACCOMMODATION',
+        entityType: 'accommodation',
+        entityId: destinationAccommodationId,
+        details: { destinationId: result.rows[0].id },
+      });
+    }
+
     return res.status(201).json({
       message: 'Destination added.',
       destination: result.rows[0],
@@ -338,6 +356,23 @@ async function updateDestination(req, res) {
         nextAccommodationText,
       ]
     );
+
+    await recordActivitySafely({
+      req,
+      action: 'UPDATE_DESTINATION',
+      entityType: 'destination',
+      entityId: destination.id,
+      details: { tripId: destination.trip_id },
+    });
+    if (accommodationIdProvided && nextAccommodationId !== null) {
+      await recordActivitySafely({
+        req,
+        action: 'SELECT_ACCOMMODATION',
+        entityType: 'accommodation',
+        entityId: nextAccommodationId,
+        details: { destinationId: destination.id },
+      });
+    }
 
     return res.status(200).json({
       message: 'Destination updated.',

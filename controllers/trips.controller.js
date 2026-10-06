@@ -1,8 +1,20 @@
 const pool = require('../config/db');
 const { logAction } = require('../utils/logger');
+const { recordActivitySafely } = require('../utils/activityLogger');
 
 const VALID_STATUSES = ['planning', 'confirmed', 'ongoing', 'completed', 'cancelled'];
 const VALID_VISIBILITIES = ['private', 'friends', 'public'];
+
+function normalizeCountryRoute(value) {
+  if (!Array.isArray(value) || value.length > 30) throw new TypeError('country_route must be an array with at most 30 countries.');
+  return value.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new TypeError('country_route entries must include a countryId and name.');
+    const countryId = typeof entry.countryId === 'string' ? entry.countryId.trim() : '';
+    const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+    if (!countryId || countryId.length > 100 || !name || name.length > 150) throw new TypeError('country_route entries must include a valid countryId and name.');
+    return { countryId, name, order: index };
+  });
+}
 
 // GET /api/trips
 // Customers see only their own trips. Staff/Admin see everyone's trips.
@@ -56,8 +68,11 @@ async function getTripById(req, res) {
 // POST /api/trips
 async function createTrip(req, res) {
   try {
-    const { id: userId } = req.user;
+    const { id: userId, role } = req.user;
     const { title, start_date, end_date, total_budget, status, cover_photo, visibility } = req.body;
+    let countryRoute;
+    try { countryRoute = normalizeCountryRoute(req.body.country_route ?? []); }
+    catch (error) { return res.status(400).json({ message: error.message }); }
 
     if (!title || !start_date || !end_date) {
       return res.status(400).json({ message: 'title, start_date, and end_date are required.' });
@@ -71,14 +86,17 @@ async function createTrip(req, res) {
     const tripVisibility = (visibility && VALID_VISIBILITIES.includes(visibility)) ? visibility : 'private';
 
     const result = await pool.query(
-      `INSERT INTO trips (user_id, title, start_date, end_date, total_budget, status, cover_photo, visibility)
-       VALUES ($1, $2, $3, $4, $5, $6::trip_status, $7, $8)
+      `INSERT INTO trips (user_id, title, start_date, end_date, total_budget, status, cover_photo, visibility, country_route)
+       VALUES ($1, $2, $3, $4, $5, $6::trip_status, $7, $8, $9::jsonb)
        RETURNING *`,
-      [userId, title, start_date, end_date, total_budget || 0, tripStatus, cover_photo || null, tripVisibility]
+      [userId, title, start_date, end_date, total_budget || 0, tripStatus, cover_photo || null, tripVisibility, JSON.stringify(countryRoute)]
     );
 
     const trip = result.rows[0];
-    logAction({ userId, actionType: 'CREATE_TRIP', tableAffected: 'trips', recordId: trip.id, description: `Created trip "${title}"` });
+    if (role !== 'customer') {
+      logAction({ userId, actionType: 'CREATE_TRIP', tableAffected: 'trips', recordId: trip.id, description: `Created trip "${title}"` });
+    }
+    await recordActivitySafely({ req, action: 'CREATE_TRIP', entityType: 'trip', entityId: trip.id, details: { status: trip.status } });
 
     return res.status(201).json({ message: 'Trip created.', trip });
   } catch (err) {
@@ -93,6 +111,11 @@ async function updateTrip(req, res) {
     const { id } = req.params;
     const { id: userId, role } = req.user;
     const { title, start_date, end_date, total_budget, status, cover_photo, visibility } = req.body;
+    let countryRoute = null;
+    if (Object.prototype.hasOwnProperty.call(req.body, 'country_route')) {
+      try { countryRoute = normalizeCountryRoute(req.body.country_route); }
+      catch (error) { return res.status(400).json({ message: error.message }); }
+    }
 
     if (status && !VALID_STATUSES.includes(status)) {
       return res.status(400).json({ message: `status must be one of: ${VALID_STATUSES.join(', ')}` });
@@ -121,8 +144,9 @@ async function updateTrip(req, res) {
            total_budget = COALESCE($4, total_budget),
            status = COALESCE($5::trip_status, status),
            cover_photo = COALESCE($6, cover_photo),
-           visibility = COALESCE($7, visibility)
-       WHERE id = $8
+           visibility = COALESCE($7, visibility),
+           country_route = COALESCE($8::jsonb, country_route)
+       WHERE id = $9
        RETURNING *`,
       [
         title ?? null,
@@ -132,11 +156,15 @@ async function updateTrip(req, res) {
         status ?? null,
         cover_photo ?? null,
         visibility ?? null,
+        countryRoute === null ? null : JSON.stringify(countryRoute),
         id,
       ]
     );
 
-    logAction({ userId, actionType: 'UPDATE_TRIP', tableAffected: 'trips', recordId: id, description: `Updated trip #${id}` });
+    if (role !== 'customer') {
+      logAction({ userId, actionType: 'UPDATE_TRIP', tableAffected: 'trips', recordId: id, description: `Updated trip #${id}` });
+    }
+    await recordActivitySafely({ req, action: 'UPDATE_TRIP', entityType: 'trip', entityId: id, details: { status: result.rows[0].status } });
 
     return res.status(200).json({ message: 'Trip updated.', trip: result.rows[0] });
   } catch (err) {
@@ -164,7 +192,10 @@ async function deleteTrip(req, res) {
 
     await pool.query('DELETE FROM trips WHERE id = $1', [id]);
     const deleteReason = req.body && req.body.reason ? `Force deleted trip #${id}: ${req.body.reason}` : `Deleted trip #${id}`;
-    logAction({ userId, actionType: 'DELETE_TRIP', tableAffected: 'trips', recordId: id, description: deleteReason });
+    if (role !== 'customer') {
+      logAction({ userId, actionType: 'DELETE_TRIP', tableAffected: 'trips', recordId: id, description: deleteReason });
+    }
+    await recordActivitySafely({ req, action: 'DELETE_TRIP', entityType: 'trip', entityId: id });
 
     return res.status(200).json({ message: 'Trip deleted.' });
   } catch (err) {
@@ -180,7 +211,8 @@ async function initTripColumns() {
     await pool.query(`
       ALTER TABLE trips
       ADD COLUMN IF NOT EXISTS cover_photo TEXT,
-      ADD COLUMN IF NOT EXISTS visibility VARCHAR(50) DEFAULT 'private';
+      ADD COLUMN IF NOT EXISTS visibility VARCHAR(50) DEFAULT 'private',
+      ADD COLUMN IF NOT EXISTS country_route JSONB NOT NULL DEFAULT '[]'::jsonb;
     `);
     console.log('Trip columns (cover_photo, visibility) verified.');
   } catch (err) {

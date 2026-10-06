@@ -11,6 +11,7 @@ const propertyRows = new Map([
 const trip = { id: 1, user_id: 7 };
 let destination = null;
 let nextId = 40;
+const activityRows = [];
 const fakePool = {
   async query(sql, values = []) {
     if (sql.includes('FROM trips WHERE id = $1')) return { rows: [trip] };
@@ -38,6 +39,15 @@ const fakePool = {
       };
       return { rows: [{ ...destination }] };
     }
+    if (sql.includes('INSERT INTO activity_logs')) {
+      const row = {
+        id: activityRows.length + 1,
+        user_id: values[0], session_id: values[1], action: values[2],
+        entity_type: values[3], entity_id: values[4], details: JSON.parse(values[5]),
+      };
+      activityRows.push(row);
+      return { rows: [row] };
+    }
     if (sql.includes('SELECT * FROM destinations WHERE trip_id = $1')) return { rows: destination ? [{ ...destination }] : [] };
     throw new Error(`Unexpected mocked query: ${sql}`);
   },
@@ -45,7 +55,7 @@ const fakePool = {
 
 const originalLoad = Module._load;
 Module._load = function patchedLoad(request, parent, isMain) {
-  if (request === '../config/db' && parent?.filename.endsWith('destinations.controller.js')) return fakePool;
+  if (request === '../config/db') return fakePool;
   return originalLoad.call(this, request, parent, isMain);
 };
 const controller = require('../controllers/destinations.controller');
@@ -60,11 +70,15 @@ function response() {
   };
 }
 
+function controllerRequest(properties) {
+  return { ...properties, ip: '127.0.0.1', get: () => 'destination accommodation controller test' };
+}
+
 async function run() {
   const customer = { id: 7, role: 'customer' };
   const create = async (body) => {
     const res = response();
-    await controller.createDestination({ body: { trip_id: 1, country: 'Japan', location_name: 'Tokyo', ...body }, user: customer }, res);
+    await controller.createDestination(controllerRequest({ body: { trip_id: 1, country: 'Japan', location_name: 'Tokyo', ...body }, user: customer }), res);
     return res;
   };
 
@@ -91,14 +105,14 @@ async function run() {
 
   destination = { ...destination, id: tokyoId, country: 'Japan', location_name: 'Tokyo', country_code: 'JP', region: 'Tokyo', accommodation_id: 11, accommodation: 'Tokyo Demo Stay' };
   res = response();
-  await controller.updateDestination({ params: { id: String(tokyoId) }, body: { country: 'Japan', location_name: 'Osaka' }, user: customer }, res);
+  await controller.updateDestination(controllerRequest({ params: { id: String(tokyoId) }, body: { country: 'Japan', location_name: 'Osaka' }, user: customer }), res);
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.destination.accommodation_id, null);
   assert.equal(res.body.destination.accommodation, null);
 
   destination = { ...destination, country: 'Japan', location_name: 'Tokyo', accommodation_id: null, accommodation: 'Legacy Hotel Text' };
   res = response();
-  await controller.getDestinationById({ params: { id: String(tokyoId) }, user: customer }, res);
+  await controller.getDestinationById(controllerRequest({ params: { id: String(tokyoId) }, user: customer }), res);
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.destination.accommodation_id, null);
   assert.equal(res.body.destination.accommodation, 'Legacy Hotel Text');
@@ -106,10 +120,13 @@ async function run() {
   destination.accommodation_id = 11;
   destination.accommodation = 'Tokyo Demo Stay';
   res = response();
-  await controller.updateDestination({ params: { id: String(tokyoId) }, body: { accommodation_id: null }, user: customer }, res);
+  await controller.updateDestination(controllerRequest({ params: { id: String(tokyoId) }, body: { accommodation_id: null }, user: customer }), res);
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.destination.accommodation_id, null);
   assert.equal(res.body.destination.accommodation, null);
+  assert.ok(activityRows.some((row) => row.action === 'ADD_DESTINATION'));
+  assert.ok(activityRows.some((row) => row.action === 'SELECT_ACCOMMODATION'));
+  assert.ok(activityRows.some((row) => row.action === 'UPDATE_DESTINATION'));
 
   console.log('Destination accommodation controller checks passed (no database writes).');
 }
