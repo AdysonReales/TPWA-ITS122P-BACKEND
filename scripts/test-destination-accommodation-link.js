@@ -28,13 +28,13 @@ const fakePool = {
     if (sql.includes('UPDATE destinations')) {
       destination = {
         ...destination,
-        location_name: values[13] ? values[0] : destination.location_name,
-        latitude: values[13] ? values[1] : destination.latitude,
-        longitude: values[13] ? values[2] : destination.longitude,
-        country: values[13] ? values[4] : destination.country,
-        country_code: values[13] ? values[5] : destination.country_code,
-        region: values[13] ? values[6] : destination.region,
-        accommodation_id: values[14], accommodation: values[15],
+        location_name: values[12] ? values[0] : destination.location_name,
+        latitude: values[12] ? values[1] : destination.latitude,
+        longitude: values[12] ? values[2] : destination.longitude,
+        country: values[12] ? values[4] : destination.country,
+        country_code: values[12] ? values[5] : destination.country_code,
+        region: values[12] ? values[6] : destination.region,
+        accommodation_id: values[13], accommodation: values[14],
       };
       return { rows: [{ ...destination }] };
     }

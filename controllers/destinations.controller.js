@@ -305,20 +305,20 @@ async function updateDestination(req, res) {
 
     const result = await pool.query(
       `UPDATE destinations
-       SET location_name = CASE WHEN $14 THEN $1 ELSE location_name END,
-           latitude = CASE WHEN $14 THEN $2 ELSE latitude END,
-           longitude = CASE WHEN $14 THEN $3 ELSE longitude END,
+       SET location_name = CASE WHEN $13 THEN $1 ELSE location_name END,
+           latitude = CASE WHEN $13 THEN $2 ELSE latitude END,
+           longitude = CASE WHEN $13 THEN $3 ELSE longitude END,
            order_sequence = COALESCE($4, order_sequence),
-           country = CASE WHEN $14 THEN $5 ELSE country END,
-           country_code = CASE WHEN $14 THEN $6 ELSE country_code END,
-           region = CASE WHEN $14 THEN $7 ELSE region END,
+           country = CASE WHEN $13 THEN $5 ELSE country END,
+           country_code = CASE WHEN $13 THEN $6 ELSE country_code END,
+           region = CASE WHEN $13 THEN $7 ELSE region END,
            parent_destination_id = COALESCE($8, parent_destination_id),
            days = COALESCE($9, days),
-           accommodation_id = $15,
-           accommodation = $16,
-           activities = COALESCE($11, activities),
-           transportation = COALESCE($12, transportation)
-       WHERE id = $13
+           accommodation_id = $14,
+           accommodation = $15,
+           activities = COALESCE($10, activities),
+           transportation = COALESCE($11, transportation)
+       WHERE id = $12
        RETURNING *`,
       [
         canonical?.area ?? null,
@@ -330,7 +330,6 @@ async function updateDestination(req, res) {
         canonical?.region ?? null,
         parent_destination_id,
         days,
-        accommodation,
         activities,
         transportation,
         id,
