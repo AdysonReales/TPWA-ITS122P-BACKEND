@@ -188,7 +188,7 @@ async function createDestination(req, res) {
        RETURNING *`,
       [
         trip_id,
-        canonical.area,
+        String(location_name).trim(),
         canonical.latitude,
         canonical.longitude,
         order_sequence ?? 1,
@@ -274,9 +274,12 @@ async function updateDestination(req, res) {
       canonical = resolution.location;
     }
 
+    const requestedDisplayName = location_name === undefined
+      ? destination.location_name
+      : String(location_name).trim();
     const locationChanged = Boolean(canonical) && (
       normalizeCountry(canonical.country) !== normalizeCountry(destination.country) ||
-      normalizeArea(canonical.area) !== normalizeArea(destination.location_name)
+      normalizeArea(requestedDisplayName) !== normalizeArea(destination.location_name)
     );
     const accommodationIdProvided = Object.prototype.hasOwnProperty.call(req.body, 'accommodation_id');
     let nextAccommodationId = destination.accommodation_id ?? null;
@@ -339,7 +342,7 @@ async function updateDestination(req, res) {
        WHERE id = $12
        RETURNING *`,
       [
-        canonical?.area ?? null,
+        requestedDisplayName,
         canonical?.latitude ?? null,
         canonical?.longitude ?? null,
         order_sequence,

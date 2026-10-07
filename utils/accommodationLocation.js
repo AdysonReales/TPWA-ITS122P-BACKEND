@@ -4,16 +4,22 @@ const COUNTRY_ALIASES = new Map([
   ['south korea', 'South Korea'],
   ['korea', 'South Korea'],
   ['republic of korea', 'South Korea'],
-  ['republic of korea (south)', 'South Korea'],
+  ['republic of korea south', 'South Korea'],
+  ['korea republic of', 'South Korea'],
   ['kr', 'South Korea'],
   ['singapore', 'Singapore'],
   ['sg', 'Singapore'],
   ['taiwan', 'Taiwan'],
   ['tw', 'Taiwan'],
+  ['hong kong', 'Hong Kong'],
+  ['hong kong sar', 'Hong Kong'],
+  ['hong kong special administrative region', 'Hong Kong'],
+  ['macau', 'Macau'],
+  ['macao', 'Macau'],
 ]);
 
 function normalizeCountry(value) {
-  const normalized = String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const normalized = normalizeLookup(value);
   return COUNTRY_ALIASES.get(normalized) || (normalized ? normalized.replace(/\b\p{L}/gu, (letter) => letter.toUpperCase()) : '');
 }
 
@@ -29,11 +35,17 @@ function countryQueryVariants(value) {
 }
 
 function normalizeArea(value) {
-  return String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en');
+  return normalizeLookup(value);
 }
 
 function normalizeLookup(value) {
-  return String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en');
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('en')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
 }
 
 function getDestinationLocation(destination) {

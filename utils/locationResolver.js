@@ -39,8 +39,10 @@ async function resolveLocation(countryInput, areaInput, regionHint) {
     getAllCitiesOfCountry(country.iso2),
     getStatesOfCountry(country.iso2),
   ]);
-  const matchingCities = cities.filter((city) => normalizeLookup(city.name) === areaName);
-  const matchingStates = states.filter((state) => normalizeLookup(state.name) === areaName);
+  const citySearchNames = [areaName];
+  if (areaName.endsWith(' island')) citySearchNames.push(areaName.replace(/\s+island$/, ''));
+  const matchingCities = cities.filter((city) => citySearchNames.includes(normalizeLookup(city.name)));
+  const matchingStates = states.filter((state) => citySearchNames.includes(normalizeLookup(state.name)));
   const hint = normalizeLookup(regionHint);
 
   let candidates;
@@ -51,6 +53,27 @@ async function resolveLocation(countryInput, areaInput, regionHint) {
     });
   } else {
     candidates = matchingStates.map((state) => toCandidate(state, country, state, 'region'));
+  }
+
+  // Broad, Mapbox-labeled regions such as "Northeast Ohio" are not city
+  // records. Resolve only when their trailing geographic name uniquely
+  // identifies a canonical state/region from the reference dataset. Keep the
+  // submitted label separately in destinations.location_name; coordinates and
+  // accommodation lookup use this canonical state record.
+  if (!candidates.length) {
+    const areaWithoutDescriptor = areaName.replace(/\s+(region|area|state|province)$/, '');
+    const containingRegions = states.filter((state) => {
+      const stateName = normalizeLookup(state.name);
+      return areaWithoutDescriptor.endsWith(` ${stateName}`) && stateName !== areaWithoutDescriptor;
+    });
+    const hintedState = hint
+      ? states.find((state) => normalizeLookup(state.name) === hint)
+      : null;
+    const safeRegion = containingRegions.length === 1 &&
+      (!hintedState || hintedState.id === containingRegions[0].id)
+      ? containingRegions[0]
+      : null;
+    if (safeRegion) candidates = [toCandidate(safeRegion, country, safeRegion, 'region')];
   }
 
   if (hint && candidates.length > 1) {

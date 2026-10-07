@@ -1,4 +1,17 @@
 const pool = require('../config/db');
+const {
+  normalizeCountry,
+  normalizeLookup,
+  countryQueryVariants,
+  getDestinationLocation,
+} = require('../utils/accommodationLocation');
+
+function matchesRecommendationDestination(recommendation, requestedArea) {
+  const requested = normalizeLookup(requestedArea);
+  if (!requested) return false;
+  return [recommendation.destination_name, ...(recommendation.destination_aliases || [])]
+    .some((candidate) => normalizeLookup(candidate) === requested);
+}
 
 async function getVendorProfileIdForUser(userId) {
   const result = await pool.query('SELECT id FROM vendor_profiles WHERE user_id = $1', [userId]);
@@ -60,7 +73,37 @@ async function getActivities(req, res) {
       values
     );
 
-    return res.status(200).json({ activities: result.rows });
+    let activities = result.rows;
+    if (destination && country) {
+      const { area: requestedArea } = getDestinationLocation({ location_name: destination, country });
+      const recommendations = await pool.query(
+        `SELECT -id AS id, title, destination_name AS destination,
+                country AS destination_country, destination_name, destination_aliases,
+                category, category_type,
+                NULL::integer AS destination_id, 0::numeric AS cost
+         FROM activity_recommendations
+         WHERE LOWER(country) = ANY($1::text[])
+         ORDER BY title ASC`,
+        [countryQueryVariants(country)]
+      );
+      const canonicalCountry = normalizeCountry(country);
+      const seenTitles = new Set(activities.map((activity) => activity.title.trim().toLocaleLowerCase()));
+      activities = [
+        ...activities,
+        ...recommendations.rows
+          .filter((activity) => normalizeCountry(activity.destination_country) === canonicalCountry)
+          .filter((activity) => matchesRecommendationDestination(activity, requestedArea))
+          .filter((activity) => {
+          const key = activity.title.trim().toLocaleLowerCase();
+          if (seenTitles.has(key)) return false;
+          seenTitles.add(key);
+          return true;
+          })
+          .map(({ destination_name, destination_aliases, ...activity }) => activity),
+      ];
+    }
+
+    return res.status(200).json({ activities });
   } catch (err) {
     console.error('Get activities error:', err);
     return res.status(500).json({ message: 'Server error.' });
@@ -216,4 +259,4 @@ async function deleteActivity(req, res) {
   }
 }
 
-module.exports = { getActivities, getActivityById, createActivity, updateActivity, deleteActivity };
+module.exports = { getActivities, getActivityById, createActivity, updateActivity, deleteActivity, matchesRecommendationDestination };
