@@ -157,12 +157,17 @@ CREATE TABLE notifications (
 CREATE TABLE user_sessions (
     id             SERIAL PRIMARY KEY,
     user_id        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    visitor_id     UUID,
     ip_address     INET,
     user_agent     TEXT,
     current_page   VARCHAR(500),
     started_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_seen_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    ended_at       TIMESTAMPTZ
+    ended_at       TIMESTAMPTZ,
+    session_start  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    session_end    TIMESTAMPTZ,
+    duration_seconds INTEGER NOT NULL DEFAULT 0,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ============================================================

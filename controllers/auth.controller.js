@@ -192,7 +192,14 @@ async function register(req, res) {
       console.log(`\n[BREVO_API_KEY NOT CONFIGURED] Verification OTP for ${user.email}: ${otp}\n`);
     }
 
-    const token = signToken(user);
+    let session = null;
+    try {
+      session = await startUserSession(req, user.id, req.body?.visitor_id);
+    } catch (sessionError) {
+      console.error('Registration succeeded but session tracking failed:', sessionError.message);
+    }
+
+    const token = signToken(user, session?.id ?? null);
     setAuthCookie(res, token);
 
     return res.status(201).json({
@@ -249,7 +256,7 @@ async function login(req, res) {
 
     let session = null;
     try {
-      session = await startUserSession(req, user.id);
+      session = await startUserSession(req, user.id, req.body?.visitor_id);
     } catch (sessionError) {
       // Keep the existing login contract available if telemetry storage has a transient issue.
       console.error('Login succeeded but session tracking failed:', sessionError.message);
