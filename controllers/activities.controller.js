@@ -9,6 +9,15 @@ async function getVendorProfileIdForUser(userId) {
 async function getActivities(req, res) {
   try {
     const { destination_id, category_id, vendor_id } = req.query;
+    const destination = typeof req.query.destination === 'string' ? req.query.destination.trim() : '';
+    const country = typeof req.query.country === 'string' ? req.query.country.trim() : '';
+
+    if (req.query.destination !== undefined && (!destination || destination.length > 150)) {
+      return res.status(400).json({ message: 'destination must be a non-empty area name of at most 150 characters.' });
+    }
+    if (req.query.country !== undefined && (!country || country.length > 150)) {
+      return res.status(400).json({ message: 'country must be a non-empty country name of at most 150 characters.' });
+    }
     const conditions = [];
     const values = [];
 
@@ -24,10 +33,26 @@ async function getActivities(req, res) {
       values.push(vendor_id);
       conditions.push(`vendor_id = $${values.length}`);
     }
+    if (destination) {
+      values.push(destination);
+      const areaParameter = `$${values.length}`;
+      conditions.push(`(
+        LOWER(d.location_name) = LOWER(${areaParameter})
+        OR LOWER(d.location_name) LIKE LOWER(${areaParameter} || ',%')
+        OR LOWER(${areaParameter}) LIKE LOWER(d.location_name || ',%')
+      )`);
+    }
+    if (country) {
+      values.push(country);
+      // Legacy/demo destinations may predate the country column. When country
+      // is missing, the strict area condition above still scopes the matches.
+      conditions.push(`(d.country IS NULL OR LOWER(d.country) = LOWER($${values.length}))`);
+    }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const result = await pool.query(
-      `SELECT a.*, d.location_name as destination, c.name as category 
+      `SELECT a.*, d.location_name as destination, d.country as destination_country,
+              c.name as category, c.type as category_type
        FROM activities a
        LEFT JOIN destinations d ON a.destination_id = d.id
        LEFT JOIN categories c ON a.category_id = c.categoryid
@@ -47,7 +72,8 @@ async function getActivityById(req, res) {
   try {
     const { id } = req.params;
     const result = await pool.query(
-      `SELECT a.*, d.location_name as destination, c.name as category 
+      `SELECT a.*, d.location_name as destination, d.country as destination_country,
+              c.name as category, c.type as category_type
        FROM activities a
        LEFT JOIN destinations d ON a.destination_id = d.id
        LEFT JOIN categories c ON a.category_id = c.categoryid

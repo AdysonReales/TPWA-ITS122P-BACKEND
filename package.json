@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "seed:accommodations": "node scripts/seed-accommodations.js"
+    "seed:accommodations": "node scripts/seed-accommodations.js",
+    "test:destination-activity-filter": "node scripts/test-destination-activity-filter.js"
   },
   "dependencies": {
     "@countrystatecity/countries": "^1.0.9",
