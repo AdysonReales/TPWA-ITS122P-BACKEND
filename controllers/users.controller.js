@@ -198,31 +198,64 @@ async function updateUser(req, res) {
 
 // DELETE /api/users/:id  (admin only)
 async function deleteUser(req, res) {
+  if (!req.user?.id) {
+    return res.status(403).json({ message: 'Administrator identity is required.' });
+  }
+
+  let client;
+  let transactionStarted = false;
+
   try {
+    client = await pool.connect();
     const { id } = req.params;
-    const existing = await pool.query('SELECT full_name, email FROM users WHERE id = $1', [id]);
-    const existingUser = existing.rows[0];
+    await client.query('BEGIN');
+    transactionStarted = true;
 
-    const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING id', [id]);
-
-    if (result.rows.length === 0) {
+    const existingResult = await client.query(
+      'SELECT id, full_name, email FROM users WHERE id = $1 FOR UPDATE',
+      [id]
+    );
+    const targetUser = existingResult.rows[0];
+    if (!targetUser) {
+      await client.query('ROLLBACK');
+      transactionStarted = false;
       return res.status(404).json({ message: 'User not found.' });
     }
 
-    if (req.user) {
-      logAction({
-        userId: req.user.id,
-        actionType: 'FORCE_DELETE_USER',
-        tableAffected: 'users',
-        recordId: id,
-        description: `Permanently deleted user account #${id} (${existingUser ? existingUser.email : 'Unknown'})`,
-      });
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 500) : '';
+    const targetSnapshot = [targetUser.full_name, targetUser.email].filter(Boolean).join(' | ');
+    const description = `Force deleted user #${targetUser.id}${targetSnapshot ? ` (${targetSnapshot})` : ''}${reason ? `. Reason: ${reason}` : ''}`
+      .slice(0, 255);
+
+    await client.query(
+      `INSERT INTO system_logs (user_id, action_type, table_affected, record_id, description)
+       VALUES ($1, 'FORCE_DELETE_USER', 'users', $2, $3)`,
+      [req.user.id, targetUser.id, description]
+    );
+
+    const deletedResult = await client.query(
+      'DELETE FROM users WHERE id = $1 RETURNING id',
+      [targetUser.id]
+    );
+    if (!deletedResult.rows[0]) {
+      throw new Error('Target user disappeared during force deletion.');
     }
 
+    await client.query('COMMIT');
+    transactionStarted = false;
     return res.status(200).json({ message: 'User deleted.' });
   } catch (err) {
+    if (transactionStarted) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Force delete rollback error:', rollbackError);
+      }
+    }
     console.error('Delete user error:', err);
-    return res.status(500).json({ message: 'Server error.' });
+    return res.status(500).json({ message: 'Unable to delete user and record the audit event.' });
+  } finally {
+    client?.release();
   }
 }
 // GET /api/users/search?q=... (Search users by name or username)
