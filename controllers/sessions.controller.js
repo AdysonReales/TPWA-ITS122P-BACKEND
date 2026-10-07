@@ -2,6 +2,7 @@ const pool = require('../config/db');
 const { parsePositiveInteger } = require('../utils/telemetryValidation');
 const { ACTIVITY_ACTION_SQL } = require('../utils/activityEvents');
 const { ACTIVE_TIMEOUT_SECONDS, normalizeVisitorId, startUserSession, closeStaleUserSessions } = require('../utils/userSessions');
+const { serializeAdminSession } = require('../utils/maskIpAddress');
 
 async function startVisit(req, res) {
   const visitorId = normalizeVisitorId(req.body?.visitor_id);
@@ -63,8 +64,9 @@ async function getSessions(req, res) {
        LIMIT $${activeTimeoutParameter + 1} OFFSET $${activeTimeoutParameter + 2}`,
       listValues
     );
+    const sessions = result.rows.map(serializeAdminSession);
     return res.status(200).json({
-      sessions: result.rows,
+      sessions,
       pagination: { page: pageNumber, limit, total: countResult.rows[0].total },
     });
   } catch (error) {
@@ -110,7 +112,10 @@ async function getSessionActions(req, res) {
   try {
     const sessionId = parsePositiveInteger(req.params.id);
     if (!sessionId) return res.status(400).json({ message: 'Session ID must be a positive integer.' });
-    const session = await pool.query('SELECT id AS session_id FROM user_sessions WHERE id = $1', [sessionId]);
+    const session = await pool.query(
+      'SELECT id AS session_id, ip_address::text AS ip_address FROM user_sessions WHERE id = $1',
+      [sessionId]
+    );
     if (!session.rows[0]) return res.status(404).json({ message: 'Session not found.' });
 
     const pageNumber = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
@@ -128,7 +133,7 @@ async function getSessionActions(req, res) {
       ),
     ]);
     return res.status(200).json({
-      session: session.rows[0],
+      session: serializeAdminSession(session.rows[0]),
       actions: result.rows,
       pagination: { page: pageNumber, limit, total: countResult.rows[0].total },
     });

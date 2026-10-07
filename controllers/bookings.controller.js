@@ -2,6 +2,7 @@ const pool = require('../config/db');
 const { logAction } = require('../utils/logger');
 const { normalizeCountry, normalizeArea, getDestinationLocation } = require('../utils/accommodationLocation');
 const { recordActivitySafely } = require('../utils/activityLogger');
+const { validateBookingDate } = require('../utils/bookingDateRange');
 
 // Normalizing helpers between Postgres Title-Case enum ('Pending', 'Confirmed'...)
 // and public API lowercase contract ('pending', 'confirmed'...)
@@ -136,7 +137,8 @@ async function createBooking(req, res) {
       `SELECT a.id, a.country AS accommodation_country, a.area AS accommodation_area,
               a.name, a.price, d.country AS destination_country,
               d.location_name, d.accommodation_id AS destination_accommodation_id,
-              d.trip_id, t.user_id AS trip_owner_id
+              d.trip_id, t.user_id AS trip_owner_id,
+              t.start_date::text AS trip_start_date, t.end_date::text AS trip_end_date
        FROM accommodations a
        JOIN destinations d ON d.id = $2
        JOIN trips t ON t.id = d.trip_id
@@ -145,6 +147,17 @@ async function createBooking(req, res) {
     );
     if (!accommodationResult.rows[0]) return res.status(400).json({ message: 'Destination does not belong to this trip, or accommodation is unavailable.' });
     const accommodation = accommodationResult.rows[0];
+    const bookingDateError = validateBookingDate(
+      booking_date,
+      accommodation.trip_start_date,
+      accommodation.trip_end_date,
+    );
+    if (bookingDateError) {
+      return res.status(bookingDateError.status).json({
+        code: bookingDateError.code,
+        message: bookingDateError.message,
+      });
+    }
     if (
       accommodation.destination_accommodation_id !== null &&
       accommodation.destination_accommodation_id !== undefined &&
