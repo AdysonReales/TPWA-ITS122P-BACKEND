@@ -204,6 +204,111 @@ async function deleteTrip(req, res) {
   }
 }
 
+// DELETE /api/trips/:id/force-delete (admin-only Master Records override)
+async function forceDeleteTrip(req, res) {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ message: 'Administrator access is required to force-delete a trip.' });
+  }
+
+  const tripId = Number(req.params.id);
+  if (!Number.isSafeInteger(tripId) || tripId <= 0) {
+    return res.status(400).json({ message: 'A valid trip ID is required.' });
+  }
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 100) : '';
+  if (!reason) {
+    return res.status(400).json({ message: 'A deletion reason is required.' });
+  }
+
+  let client;
+  let transactionStarted = false;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    transactionStarted = true;
+
+    const tripResult = await client.query(
+      'SELECT id, title, user_id, start_date, end_date, status FROM trips WHERE id = $1 FOR UPDATE',
+      [tripId]
+    );
+    const trip = tripResult.rows[0];
+    if (!trip) {
+      await client.query('ROLLBACK');
+      transactionStarted = false;
+      return res.status(404).json({ message: 'Trip not found.' });
+    }
+
+    // Live system_logs deployments use compact column names; schema.sql uses underscored names.
+    const columnsResult = await client.query(
+      `SELECT column_name
+       FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = 'system_logs'`
+    );
+    const logColumns = new Set(columnsResult.rows.map((row) => row.column_name));
+    const column = (...candidates) => candidates.find((candidate) => logColumns.has(candidate));
+    const actorColumn = column('user_id', 'userid');
+    const actionColumn = column('action_type', 'actiontype');
+    const tableColumn = column('table_affected', 'tableaffected');
+    const recordColumn = column('record_id', 'recordid');
+    const descriptionColumn = column('description');
+    if (!actorColumn || !actionColumn || !tableColumn || !recordColumn || !descriptionColumn) {
+      throw new Error('System audit log is missing required columns.');
+    }
+
+    // The live schema has NO ACTION trip/destination references from bookings and expenses.
+    await client.query(
+      `DELETE FROM bookings
+       WHERE trip_id = $1
+          OR destination_id IN (SELECT id FROM destinations WHERE trip_id = $1)`,
+      [trip.id]
+    );
+    await client.query(
+      `DELETE FROM expenses
+       WHERE trip_id = $1
+          OR destination_id IN (SELECT id FROM destinations WHERE trip_id = $1)`,
+      [trip.id]
+    );
+
+    const deleted = await client.query('DELETE FROM trips WHERE id = $1 RETURNING id', [trip.id]);
+    if (deleted.rowCount !== 1) {
+      throw new Error('Trip was not deleted; no audit entry was written.');
+    }
+
+    const dates = `${trip.start_date || 'unknown'} to ${trip.end_date || 'unknown'}`;
+    const prefix = `Trip ID ${trip.id}; owner ID ${trip.user_id}; dates ${dates}; status ${trip.status || 'unknown'}; admin ID ${req.user.id}; name="`;
+    const suffix = `"; reason: ${reason}`;
+    const name = String(trip.title || '').slice(0, Math.max(0, 255 - prefix.length - suffix.length));
+    const description = `${prefix}${name}${suffix}`;
+    const quoted = (name) => `"${name}"`;
+    await client.query(
+      `INSERT INTO system_logs (${[actorColumn, actionColumn, tableColumn, recordColumn, descriptionColumn].map(quoted).join(', ')})
+       VALUES ($1, $2, $3, $4, $5)`,
+      [req.user.id, 'MASTER_FORCE_DELETE_TRIP', 'trips', trip.id, description]
+    );
+
+    await client.query('COMMIT');
+    transactionStarted = false;
+    return res.status(200).json({
+      message: `Trip '${trip.title}' was permanently deleted and recorded in the audit trail.`,
+      trip_id: trip.id,
+    });
+  } catch (err) {
+    if (transactionStarted) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Force delete trip rollback error:', rollbackError);
+      }
+    }
+    console.error('Force delete trip error:', err);
+    const message = err?.code === '23503'
+      ? `Trip deletion is blocked by related records${err.constraint ? ` (${err.constraint})` : ''}.`
+      : (err?.message || 'Unable to delete trip and record the audit event.');
+    return res.status(500).json({ message });
+  } finally {
+    client?.release();
+  }
+}
+
 
 // Verify trips table has cover_photo and visibility columns
 async function initTripColumns() {
@@ -220,4 +325,4 @@ async function initTripColumns() {
   }
 }
 
-module.exports = { getTrips, getTripById, createTrip, updateTrip, deleteTrip, initTripColumns };
+module.exports = { getTrips, getTripById, createTrip, updateTrip, deleteTrip, forceDeleteTrip, initTripColumns };

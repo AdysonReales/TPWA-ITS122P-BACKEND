@@ -6,6 +6,7 @@ const {
   createTrip,
   updateTrip,
   deleteTrip,
+  forceDeleteTrip,
 } = require('../controllers/trips.controller');
 const { authenticateToken } = require('../middleware/auth');
 const { authorizeRoles } = require('../middleware/rbac');
@@ -18,6 +19,7 @@ router.get('/', getTrips);
 router.get('/:id', getTripById);
 router.post('/', createTrip);
 router.put('/:id', updateTrip);
+router.delete('/:id/force-delete', authorizeRoles('admin'), forceDeleteTrip);
 router.delete('/:id', deleteTrip);
 
 module.exports = router;
