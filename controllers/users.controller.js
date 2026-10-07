@@ -209,6 +209,10 @@ async function deleteUser(req, res) {
   if (requestedUserId === Number(req.user.id)) {
     return res.status(400).json({ message: 'You cannot force-delete the administrator account performing this action.' });
   }
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 100) : '';
+  if (!reason) {
+    return res.status(400).json({ message: 'A deletion reason is required.' });
+  }
 
   let client;
   let transactionStarted = false;
@@ -245,7 +249,6 @@ async function deleteUser(req, res) {
       throw new Error('System audit log is missing required columns.');
     }
 
-    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 100) : '';
     const targetSnapshot = [targetUser.full_name, targetUser.email]
       .filter(Boolean)
       .join(' | ')
