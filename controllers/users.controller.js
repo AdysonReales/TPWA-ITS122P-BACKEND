@@ -202,18 +202,25 @@ async function deleteUser(req, res) {
     return res.status(403).json({ message: 'Administrator identity is required.' });
   }
 
+  const requestedUserId = Number(req.params.id);
+  if (!Number.isSafeInteger(requestedUserId) || requestedUserId <= 0) {
+    return res.status(400).json({ message: 'A valid user ID is required.' });
+  }
+  if (requestedUserId === Number(req.user.id)) {
+    return res.status(400).json({ message: 'You cannot force-delete the administrator account performing this action.' });
+  }
+
   let client;
   let transactionStarted = false;
 
   try {
     client = await pool.connect();
-    const { id } = req.params;
     await client.query('BEGIN');
     transactionStarted = true;
 
     const existingResult = await client.query(
       'SELECT id, full_name, email FROM users WHERE id = $1 FOR UPDATE',
-      [id]
+      [requestedUserId]
     );
     const targetUser = existingResult.rows[0];
     if (!targetUser) {
@@ -222,16 +229,72 @@ async function deleteUser(req, res) {
       return res.status(404).json({ message: 'User not found.' });
     }
 
-    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 500) : '';
-    const targetSnapshot = [targetUser.full_name, targetUser.email].filter(Boolean).join(' | ');
+    const columnsResult = await client.query(
+      `SELECT column_name
+       FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = 'system_logs'`
+    );
+    const logColumns = new Set(columnsResult.rows.map((row) => row.column_name));
+    const column = (...candidates) => candidates.find((candidate) => logColumns.has(candidate));
+    const actorColumn = column('user_id', 'userid');
+    const actionColumn = column('action_type', 'actiontype');
+    const tableColumn = column('table_affected', 'tableaffected');
+    const recordColumn = column('record_id', 'recordid');
+    const descriptionColumn = column('description');
+    if (!actorColumn || !actionColumn || !tableColumn || !recordColumn || !descriptionColumn) {
+      throw new Error('System audit log is missing required columns.');
+    }
+
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 100) : '';
+    const targetSnapshot = [targetUser.full_name, targetUser.email]
+      .filter(Boolean)
+      .join(' | ')
+      .slice(0, 110);
     const description = `Force deleted user #${targetUser.id}${targetSnapshot ? ` (${targetSnapshot})` : ''}${reason ? `. Reason: ${reason}` : ''}`
       .slice(0, 255);
 
+    const quoted = (name) => `"${name}"`;
     await client.query(
-      `INSERT INTO system_logs (user_id, action_type, table_affected, record_id, description)
-       VALUES ($1, 'FORCE_DELETE_USER', 'users', $2, $3)`,
-      [req.user.id, targetUser.id, description]
+      `INSERT INTO system_logs (${[actorColumn, actionColumn, tableColumn, recordColumn, descriptionColumn].map(quoted).join(', ')})
+       VALUES ($1, $2, $3, $4, $5)`,
+      [req.user.id, 'FORCE_DELETE_USER', 'users', targetUser.id, description]
     );
+
+    // Keep prior audit records while removing the target user's FK reference.
+    await client.query(
+      `UPDATE system_logs SET ${quoted(actorColumn)} = NULL WHERE ${quoted(actorColumn)} = $1`,
+      [targetUser.id]
+    );
+
+    // Remove non-cascading dependents and trip-owned records before deleting the user.
+    await client.query('DELETE FROM activity_logs WHERE user_id = $1', [targetUser.id]);
+    await client.query('DELETE FROM user_sessions WHERE user_id = $1', [targetUser.id]);
+    await client.query(
+      `DELETE FROM bookings
+       WHERE user_id = $1
+          OR trip_id IN (SELECT id FROM trips WHERE user_id = $1)
+          OR destination_id IN (
+            SELECT d.id FROM destinations d
+            JOIN trips t ON t.id = d.trip_id
+            WHERE t.user_id = $1
+          )`,
+      [targetUser.id]
+    );
+    await client.query(
+      `DELETE FROM expenses
+       WHERE trip_id IN (SELECT id FROM trips WHERE user_id = $1)
+          OR destination_id IN (
+            SELECT d.id FROM destinations d
+            JOIN trips t ON t.id = d.trip_id
+            WHERE t.user_id = $1
+          )`,
+      [targetUser.id]
+    );
+    await client.query('DELETE FROM destinations WHERE trip_id IN (SELECT id FROM trips WHERE user_id = $1)', [targetUser.id]);
+    await client.query('DELETE FROM trips WHERE user_id = $1', [targetUser.id]);
+    await client.query('DELETE FROM feedback WHERE user_id = $1', [targetUser.id]);
+    await client.query('DELETE FROM notifications WHERE user_id = $1', [targetUser.id]);
+    await client.query('DELETE FROM vendor_profiles WHERE user_id = $1', [targetUser.id]);
 
     const deletedResult = await client.query(
       'DELETE FROM users WHERE id = $1 RETURNING id',
@@ -253,7 +316,10 @@ async function deleteUser(req, res) {
       }
     }
     console.error('Delete user error:', err);
-    return res.status(500).json({ message: 'Unable to delete user and record the audit event.' });
+    const message = err?.code === '23503'
+      ? `Deletion is blocked by related records${err.constraint ? ` (${err.constraint})` : ''}.`
+      : (err?.message || 'Unable to delete user and record the audit event.');
+    return res.status(500).json({ message });
   } finally {
     client?.release();
   }
